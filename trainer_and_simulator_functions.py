@@ -189,59 +189,119 @@ def launch_training(
             raise subprocess.CalledProcessError(p.returncode, cmd)
 
 
+def _start_process(cmd, log_file: Path, cwd: Path | None = None):
+    '''
+    Start subprocess to allow termination on both Windows and Mac/Linux systems.
+    '''
+    popen_kwargs = {
+        "stdout": open(log_file, "w"),
+        "stderr": subprocess.STDOUT,
+        "text": True,
+        "cwd": str(cwd) if cwd else None,
+    }
+
+    if os.name == "nt":
+        # Windows: create a new process group
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        # Mac/Linux: create a new session so we can kill the whole process group
+        popen_kwargs["start_new_session"] = True
+
+    return subprocess.Popen(cmd, **popen_kwargs)
+
+def _terminate_process_tree(p: subprocess.Popen, force: bool = False):
+    """
+    Terminate the subprocess cleanly, using OS-appropriate logic.
+    force=False -> polite termination
+    force=True  -> hard kill
+    """
+    if p.poll() is not None:
+        return  # already exited
+
+    if os.name == "nt":
+        # Windows does not support os.killpg / os.getpgid.
+        # terminate() is polite, kill() is forceful.
+        if force:
+            p.kill()
+        else:
+            p.terminate()
+    else:
+        pgid = os.getpgid(p.pid)
+        if force:
+            os.killpg(pgid, signal.SIGKILL)
+        else:
+            os.killpg(pgid, signal.SIGTERM)
+
+
 
 
 def run_eval(cmd, out_path: Path, poll_s=0.2, timeout_s=300, cwd: Path | None = None):
     out_path = Path(out_path)
     out_path.mkdir(parents=True, exist_ok=True)
 
-    # we use the presence of a DONE.txt file to signal that the evaluation is complete
-    # first check that the DONE.txt file does not already exist, to avoid stale DONE from previous runs
+    # Signal file written by Unity / simulation code when evaluation is complete
     done_file = out_path / "DONE.txt"
     if done_file.exists():
-        done_file.unlink()  # unlink removes the file
+        done_file.unlink()
 
     log_file = out_path / "mlagents_stdout.log"
 
-    # start the evaluation process and monitor its output in real-time, while also checking for the DONE.txt file.
-    with open(log_file, "w") as f:
-        p = subprocess.Popen(
-            cmd,
-            stdout=f,
-            stderr=subprocess.STDOUT,
-            text=True,
-            start_new_session=True,          # mac/linux: own process group
-            cwd=str(cwd) if cwd else None,
-        )
+    p = None
+    log_handle = None
 
-        # checks for DONE.txt every poll_s seconds
-        # checks if the process has exited early (e.g., due to a crash or error)
-        # checks if the process has exceeded the timeout (i.e., is taking too long)
+    try:
+        log_handle = open(log_file, "w")
+        popen_kwargs = {
+            "stdout": log_handle,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "cwd": str(cwd) if cwd else None,
+        }
+
+        if os.name == "nt":
+            # Windows: new process group
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            # Linux/macOS: new session/process group
+            popen_kwargs["start_new_session"] = True
+
+        p = subprocess.Popen(cmd, **popen_kwargs)
+
         t0 = time.time()
+
         while True:
             if done_file.exists():
                 break
+
             if p.poll() is not None:
-                raise RuntimeError(f"mlagents-learn exited early with code {p.returncode}. See {log_file}")
+                raise RuntimeError(
+                    f"mlagents-learn exited early with code {p.returncode}. See {log_file}"
+                )
+
             if time.time() - t0 > timeout_s:
-                os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+                _terminate_process_tree(p, force=False)
                 try:
                     p.wait(timeout=10)
                 except subprocess.TimeoutExpired:
-                    os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                    _terminate_process_tree(p, force=True)
                     p.wait()
+
                 raise TimeoutError(f"Timed out waiting for DONE.txt. See {log_file}")
+
             time.sleep(poll_s)
 
+        # DONE.txt appeared: shut process down cleanly
+        if p.poll() is None:
+            _terminate_process_tree(p, force=False)
+            try:
+                p.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                _terminate_process_tree(p, force=True)
+                p.wait()
 
-        # terminate cleanly
-        # ends the process group to ensure that all child processes are also terminated
-        os.killpg(os.getpgid(p.pid), signal.SIGTERM)
-        try:
-            p.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-            p.wait()
+    finally:
+        if log_handle is not None and not log_handle.closed:
+            log_handle.close()
 
     return log_file
 
@@ -254,10 +314,9 @@ def launch_inference_sim(run_dir: Path,
                 train_run_id: str,
                 out_path: Path,
                 episodes: int,
-                timeout_s: int = 300, # more time is needed for more than 100 episodes
+                timeout_s: int = 5000, # more time is needed for more than 100 episodes
                 seed: int | None = None,
                 ):
-    
     '''3) Launch unity mlagents-learn in inference mode for simulations.'''
 
     run_dir = Path(run_dir)
@@ -316,6 +375,7 @@ def sequential_runs(
         base_run_id: str = "run",
         device: str = "cpu",
         n_agents: int = 1,
+        simulate: bool = False,
         n_envs: int = 1,
         n_eps: int = 5,
         seed: int | None = None,
@@ -364,19 +424,20 @@ def sequential_runs(
             cwd=work_dir,
         )
 
-        print(f"launching inference for run {run_id}")
-        # this function launches one inference run using the trained model from the training run
-        # specify the number of episodes to run 
-        # the random seed is not currently implemented in the inference code, but it is included here for future use
-        launch_inference_sim(
-            run_dir=work_dir,
-            unity_env_path=unity_build,
-            patched_yaml_path=patched_yaml_path.resolve(),
-            train_run_id=run_id,
-            out_path=work_dir / "simulations" / f"sim_{run_id}",
-            episodes=n_eps,
-            seed=seed,
-        )
+        if simulate == True:
+            print(f"launching inference for run {run_id}")
+            # this function launches one inference run using the trained model from the training run
+            # specify the number of episodes to run 
+            # the random seed is not currently implemented in the inference code, but it is included here for future use
+            launch_inference_sim(
+                run_dir=work_dir,
+                unity_env_path=unity_build,
+                patched_yaml_path=patched_yaml_path.resolve(),
+                train_run_id=run_id,
+                out_path=work_dir / "simulations" / f"sim_{run_id}",
+                episodes=n_eps,
+                seed=seed,
+            )
 
 
 
@@ -390,6 +451,7 @@ def sbi_simulator(
         # IMPORTANT: for Linux use the unity_build path that points to the .x86_64 file (the build), e.g. unity_build = Path("/path/to/env.x86_64")
         base_run_id: str = "sbi_solo_run",
         device: str = "cpu",
+        simulate: bool = False,
         n_envs: int = 1,
         n_eps: int = 5,
         seed: int | None = None,
@@ -435,15 +497,16 @@ def sbi_simulator(
             cwd=work_dir,
         )
 
-        # this function launches one inference run using the trained model from the training run
-        # specify the number of episodes to run 
-        # the random seed is not currently implemented in the inference code, but it is included here for future use
-        launch_inference_sim(
-            run_dir=work_dir,
-            unity_env_path=unity_build,
-            patched_yaml_path=patched_yaml_path.resolve(),
-            train_run_id=run_id,
-            out_path=work_dir / "simulations" / f"sim_{run_id}",
-            episodes=n_eps,
-            seed=seed,
-        )
+        if simulate == True:
+            # this function launches one inference run using the trained model from the training run
+            # specify the number of episodes to run 
+            # the random seed is not currently implemented in the inference code, but it is included here for future use
+            launch_inference_sim(
+                run_dir=work_dir,
+                unity_env_path=unity_build,
+                patched_yaml_path=patched_yaml_path.resolve(),
+                train_run_id=run_id,
+                out_path=work_dir / "simulations" / f"sim_{run_id}",
+                episodes=n_eps,
+                seed=seed,
+            )
