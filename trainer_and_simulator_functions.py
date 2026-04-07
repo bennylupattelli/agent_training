@@ -135,6 +135,7 @@ def launch_training(
         run_id: str,
         torch_device: str,
         num_envs: int,
+        base_port: int,
         seed: int | None = None,
         extra_args: list[str] | None = None,
         cwd: Path | None = None,
@@ -163,6 +164,7 @@ def launch_training(
         "--num-envs", str(num_envs), # number of parallel environments
         "--no-graphics", # headless mode
         "--run-id", run_id, # specify run id
+        "--base-port", str(base_port),
         "--force",
     ]
 
@@ -314,6 +316,7 @@ def launch_inference_sim(run_dir: Path,
                 train_run_id: str,
                 out_path: Path,
                 episodes: int,
+                base_port: int,
                 timeout_s: int = 5000, # more time is needed for more than 100 episodes
                 seed: int | None = None,
                 ):
@@ -343,6 +346,7 @@ def launch_inference_sim(run_dir: Path,
         "--run-id", train_run_id,          
         "--resume",
         "--inference",
+        "--base-port", str(base_port),
         "--env", str(unity_env_path),
         "--no-graphics",                 
         "--env-args",
@@ -397,9 +401,13 @@ def sequential_runs(
     work_dir = Path(work_dir)
 
     for i in range(n_agents):
+        
         run_id = f"{base_run_id}_{i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
         patched_yaml_path = run_dir / f"Config_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
-            
+        
+        train_port = 5005 + 20 * i
+        sim_port   = 5015 + 20 * i  
+
         # this function replaces the placeholders in the yaml file with the sampled parameters
         patch_agents_yaml(
             template_yaml=in_yaml,
@@ -420,6 +428,7 @@ def sequential_runs(
             run_id=run_id,
             torch_device=device,
             num_envs=n_envs,
+            base_port=train_port,
             seed=seed,
             cwd=work_dir,
         )
@@ -429,16 +438,26 @@ def sequential_runs(
             # this function launches one inference run using the trained model from the training run
             # specify the number of episodes to run 
             # the random seed is not currently implemented in the inference code, but it is included here for future use
-            launch_inference_sim(
-                run_dir=work_dir,
-                unity_env_path=unity_build,
-                patched_yaml_path=patched_yaml_path.resolve(),
-                train_run_id=run_id,
-                out_path=work_dir / "simulations" / f"sim_{run_id}",
-                episodes=n_eps,
-                seed=seed,
-            )
+            try:
+                launch_inference_sim(
+                    run_dir=work_dir,
+                    unity_env_path=unity_build,
+                    patched_yaml_path=patched_yaml_path.resolve(),
+                    train_run_id=run_id,
+                    out_path=work_dir / "simulations" / f"sim_{run_id}",
+                    episodes=n_eps,
+                    base_port=sim_port,
+                    seed=seed,
+                )
+                
+            except TimeoutError as e:
+                print(f"[WARNING] Simulation timed out for {run_id}: {e}")
+                print("[WARNING] Continuing to next model.")
+            except Exception as e:
+                print(f"[WARNING] Simulation failed for {run_id}: {type(e).__name__}: {e}")
+                print("[WARNING] Continuing to next model.")
 
+        time.sleep(5)
 
 
 def sbi_simulator(
@@ -471,16 +490,19 @@ def sbi_simulator(
 
     # get N batches of parameter values from the prior distribution
     for i in range(n):
-        gamma, sp = map(float, thetas[i]) # convert tensor values to floats for yaml patching
+        _, sp = map(float, thetas[i]) # convert tensor values to floats for yaml patching
 
         run_id = f"{base_run_id}_{i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
         patched_yaml_path = run_dir / f"SoloConfig_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
+
+        train_port = 5005 + 20 * i
+        sim_port   = 5015 + 20 * i
 
         # this function replaces the placeholders in the yaml file with the sampled parameters
         patch_agents_yaml(
             template_yaml=in_yaml,
             output_yaml=patched_yaml_path,
-            gamma=gamma,
+            gamma=0.99,
             step_penalty=sp,
             behaviour_name=behaviour_name,
             extrinsic_reward_key="extrinsic"
@@ -493,6 +515,7 @@ def sbi_simulator(
             run_id=run_id,
             torch_device=device,
             num_envs=n_envs,
+            base_port=train_port,
             seed=seed,
             cwd=work_dir,
         )
@@ -501,12 +524,23 @@ def sbi_simulator(
             # this function launches one inference run using the trained model from the training run
             # specify the number of episodes to run 
             # the random seed is not currently implemented in the inference code, but it is included here for future use
-            launch_inference_sim(
-                run_dir=work_dir,
-                unity_env_path=unity_build,
-                patched_yaml_path=patched_yaml_path.resolve(),
-                train_run_id=run_id,
-                out_path=work_dir / "simulations" / f"sim_{run_id}",
-                episodes=n_eps,
-                seed=seed,
-            )
+            try:
+                launch_inference_sim(
+                    run_dir=work_dir,
+                    unity_env_path=unity_build,
+                    patched_yaml_path=patched_yaml_path.resolve(),
+                    train_run_id=run_id,
+                    out_path=work_dir / "simulations" / f"sim_{run_id}",
+                    episodes=n_eps,
+                    base_port=sim_port,
+                    seed=seed,
+                )
+
+            except TimeoutError as e:
+                print(f"[WARNING] Simulation timed out for {run_id}: {e}")
+                print("[WARNING] Continuing to next model.")
+            except Exception as e:
+                print(f"[WARNING] Simulation failed for {run_id}: {type(e).__name__}: {e}")
+                print("[WARNING] Continuing to next model.")
+
+        time.sleep(5)
