@@ -138,7 +138,7 @@ def launch_training(
         base_port: int,
         seed: int | None = None,
         extra_args: list[str] | None = None,
-        cwd: Path | None = None,
+        run_dir: Path | None = None,
 ):
     '''
     3) Launch unity mlagents-learn for one training run.
@@ -165,7 +165,7 @@ def launch_training(
         "--no-graphics", # headless mode
         "--run-id", run_id, # specify run id
         "--base-port", str(base_port),
-        "--force",
+        
     ]
 
     if seed is not None:
@@ -181,7 +181,7 @@ def launch_training(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd=str(cwd) if cwd else None
+        cwd=str(run_dir) if run_dir else None
     ) as p:
         assert p.stdout is not None
         for line in p.stdout:
@@ -332,7 +332,7 @@ def launch_inference_sim(run_dir: Path,
     if not unity_env_path.exists():
         raise FileNotFoundError(f"unity_env_path not found")
         
-    results_dir = run_dir / "results" / train_run_id
+    results_dir = run_dir / train_run_id
     if not results_dir.exists():
         raise FileNotFoundError(f"results dir not found: {results_dir}")
 
@@ -368,7 +368,6 @@ def launch_inference_sim(run_dir: Path,
 def sequential_runs(
         in_yaml: Path,
         run_dir: Path,
-        work_dir: Path,
         gamma: float = 0.99,
         sp: float = 1e-2,
         behaviour_name: str = "OctagonAgentSolo",
@@ -378,45 +377,45 @@ def sequential_runs(
         # for Windows use the unity_build path that points to the .exe file (the build), e.g. unity_build = Path("C:/path/to/env.exe")
         base_run_id: str = "run",
         device: str = "cpu",
-        n_agents: int = 1,
+        n_models: int = 1,
+        run_id_offset: int = 0,
         simulate: bool = False,
         n_envs: int = 1,
         n_eps: int = 5,
         seed: int | None = None,
+        extra_args: list[str] | None = None,
 ):
     '''
     in_yaml = "/Path/to/original.yaml"
     run_dir = "/Path/to/your/new/agents/run/directory", e.g., run_dir = Path("runs") assuming that the current working directory is the sbi directory.
-    work_dir = "/Path/to/your/work/directory/for/simulations", e.g., work_dir = Path("/Users/benny/Documents/swc/bayesian-inference/sbi")
     unity_build = Path("/Path/to/your/unity/build"), e.g. unity_build=Path("/Users/benny/Builds/OctagonAgentSolo.app")
     base_run_id = prefix to every simulation run id
     device = torch device for training (e.g., "cpu" or "cuda:0")
-    n_agents = number of agents (models) to train sequentially
+    n_models = number of agents (models) to train sequentially
     n_envs = number of parallel environments to use for training (e.g., 1, 2, 4, etc.)
     n_eps = number of episodes to run for each simulation in the inference step (e.g., 5, 10, 100, etc.)
     '''
     
     run_dir = Path(run_dir)
     in_yaml = Path(in_yaml)
-    work_dir = Path(work_dir)
 
-    for i in range(n_agents):
+    for i in range(n_models):
         
-        run_id = f"{base_run_id}_{i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
-        patched_yaml_path = run_dir / f"Config_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
-        
+        run_id = f"{base_run_id}_{run_id_offset + i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
+        # patched_yaml_path = run_dir / f"Config_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
+        patched_yaml_path = in_yaml # Do not alter the input yaml file
         train_port = 5005 + 20 * i
         sim_port   = 5015 + 20 * i  
 
-        # this function replaces the placeholders in the yaml file with the sampled parameters
-        patch_agents_yaml(
-            template_yaml=in_yaml,
-            output_yaml=patched_yaml_path,
-            gamma=gamma,
-            step_penalty=sp,
-            behaviour_name=behaviour_name,
-            extrinsic_reward_key="extrinsic",
-        )
+        # # this function replaces the placeholders in the yaml file with the sampled parameters
+        # patch_agents_yaml(
+        #     template_yaml=in_yaml,
+        #     output_yaml=patched_yaml_path,
+        #     gamma=gamma,
+        #     step_penalty=sp,
+        #     behaviour_name=behaviour_name,
+        #     extrinsic_reward_key="extrinsic",
+        # )
 
         print(f"patched yaml for run {run_id} with gamma={gamma} and step_penalty={sp} to {patched_yaml_path}")
 
@@ -430,7 +429,8 @@ def sequential_runs(
             num_envs=n_envs,
             base_port=train_port,
             seed=seed,
-            cwd=work_dir,
+            run_dir=run_dir,
+            extra_args=extra_args
         )
 
         if simulate == True:
@@ -440,11 +440,11 @@ def sequential_runs(
             # the random seed is not currently implemented in the inference code, but it is included here for future use
             try:
                 launch_inference_sim(
-                    run_dir=work_dir,
+                    run_dir=run_dir,
                     unity_env_path=unity_build,
                     patched_yaml_path=patched_yaml_path.resolve(),
                     train_run_id=run_id,
-                    out_path=work_dir / "simulations" / f"sim_{run_id}",
+                    out_path=run_dir / "simulations" / f"sim_{run_id}",
                     episodes=n_eps,
                     base_port=sim_port,
                     seed=seed,
@@ -517,7 +517,7 @@ def sbi_simulator(
             num_envs=n_envs,
             base_port=train_port,
             seed=seed,
-            cwd=work_dir,
+            run_dir=run_dir,
         )
 
         if simulate == True:
@@ -526,11 +526,11 @@ def sbi_simulator(
             # the random seed is not currently implemented in the inference code, but it is included here for future use
             try:
                 launch_inference_sim(
-                    run_dir=work_dir,
+                    run_dir=run_dir,
                     unity_env_path=unity_build,
                     patched_yaml_path=patched_yaml_path.resolve(),
                     train_run_id=run_id,
-                    out_path=work_dir / "simulations" / f"sim_{run_id}",
+                    out_path=run_dir / "simulations" / f"sim_{run_id}",
                     episodes=n_eps,
                     base_port=sim_port,
                     seed=seed,
