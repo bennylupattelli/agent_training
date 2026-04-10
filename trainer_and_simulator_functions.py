@@ -315,7 +315,7 @@ def launch_inference_sim(run_dir: Path,
                 patched_yaml_path: Path,
                 train_run_id: str,
                 out_path: Path,
-                episodes: int,
+                steps: int,
                 base_port: int,
                 timeout_s: int = 5000, # more time is needed for more than 100 episodes
                 seed: int | None = None,
@@ -351,7 +351,7 @@ def launch_inference_sim(run_dir: Path,
         "--no-graphics",                 
         "--env-args",
         "--sim_out", str(out_path.resolve()),
-        "--sim_episodes", str(episodes),
+        "--sim_steps", str(steps),
     ]
 
     if seed is not None:
@@ -381,7 +381,7 @@ def sequential_runs(
         run_id_offset: int = 0,
         simulate: bool = False,
         n_envs: int = 1,
-        n_eps: int = 5,
+        n_steps: int = 5,
         seed: int | None = None,
         extra_args: list[str] | None = None,
 ):
@@ -393,7 +393,7 @@ def sequential_runs(
     device = torch device for training (e.g., "cpu" or "cuda:0")
     n_models = number of agents (models) to train sequentially
     n_envs = number of parallel environments to use for training (e.g., 1, 2, 4, etc.)
-    n_eps = number of episodes to run for each simulation in the inference step (e.g., 5, 10, 100, etc.)
+    n_steps = number of steps to run for each simulation in the inference step (e.g., 1000, 10000, 100000, etc.)
     '''
     
     run_dir = Path(run_dir)
@@ -436,7 +436,7 @@ def sequential_runs(
         if simulate == True:
             print(f"launching inference for run {run_id}")
             # this function launches one inference run using the trained model from the training run
-            # specify the number of episodes to run 
+            # specify the number of steps to run 
             # the random seed is not currently implemented in the inference code, but it is included here for future use
             try:
                 launch_inference_sim(
@@ -472,13 +472,13 @@ def sbi_simulator(
         device: str = "cpu",
         simulate: bool = False,
         n_envs: int = 1,
-        n_eps: int = 5,
+        n_steps: int = 5,
         seed: int | None = None,
 ):
     '''Umbrella function to run the whole pipeline with one command:
     1. Sample N batches of parameters from the prior distribution
     2. For each batch of parameters, patch the template yaml file and launch a training run with the patched yaml and Unity environment build
-    3. After each training run, launch an inference run using the trained model from the training run, specifying the number of episodes to run and the random seed for future use (currently not implemented in the inference code)'''
+    3. After each training run, launch an inference run using the trained model from the training run, specifying the number of steps to run and the random seed for future use (currently not implemented in the inference code)'''
     
     run_dir = Path(run_dir)
     in_yaml = Path(in_yaml)
@@ -522,7 +522,7 @@ def sbi_simulator(
 
         if simulate == True:
             # this function launches one inference run using the trained model from the training run
-            # specify the number of episodes to run 
+            # specify the number of steps to run 
             # the random seed is not currently implemented in the inference code, but it is included here for future use
             try:
                 launch_inference_sim(
