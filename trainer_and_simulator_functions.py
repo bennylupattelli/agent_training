@@ -170,6 +170,7 @@ def launch_training(
 
     if seed is not None:
         cmd.extend(["--seed", str(seed)])
+        print(f"Using seed: {seed} for training run {run_id}")
 
     # this allows passing extra arguments, e.g., --num-envs=4
     if extra_args:
@@ -402,7 +403,7 @@ def sequential_runs(
 
     for i in range(n_models):
         
-        run_id = f"{base_run_id}_{run_id_offset + i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
+        run_id = f"{base_run_id}_{run_id_offset + 1 + i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
         # patched_yaml_path = run_dir / f"Config_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
         yaml_filename = in_yaml.name # get the filename from the input yaml path, e.g. "SoloConfig.yaml"
         patched_yaml_path = run_dir / yaml_filename # create a unique patched yaml file for each run
