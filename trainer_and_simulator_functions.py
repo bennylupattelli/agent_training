@@ -53,7 +53,7 @@ def sample_first_thetas(
 
 def patch_agents_yaml(
         template_yaml: str | Path,
-        output_yaml: str | Path,
+        run_dir: str | Path,
         gamma: float = 0.99,
         step_penalty: float = 1e-2,
         behaviour_name: str | None = None,
@@ -63,7 +63,7 @@ def patch_agents_yaml(
     '''
     2) Load yaml file for agents and patch gamma.
     template_yaml: path to yaml file,
-    output_yaml: path to write the patched yaml file,
+    run_dir: directory to save the patched yaml file,
     gamma: PPO discount,
     step_penalty: penalty for each step taken,
     behaviour_name: name of the behaviour to patch, if None patch all behaviours,
@@ -75,11 +75,11 @@ def patch_agents_yaml(
     
     run_dir = "/Path/to/your/new/agents/folder/in/run/directory", e.g., run_dir = Path("runs") / "run_0001"
     
-    output_yaml = run_dir/name_of_new_yaml_file.yaml, e.g., output_yaml = run_dir / "SoloConfig.yaml"
+    output_yaml = run_dir / "SoloConfig.yaml", e.g., output_yaml = run_dir / "SoloConfig.yaml"
     '''
 
     template_yaml = Path(template_yaml)
-    output_yaml = Path(output_yaml)
+    output_yaml = run_dir / "SoloConfig.yaml"
     output_yaml.parent.mkdir(parents=True, exist_ok=True) # creates a directory at the specified path, including any necessary parent directories.
 
     with template_yaml.open("r") as f:
@@ -368,6 +368,7 @@ def launch_inference_sim(run_dir: Path,
 def sequential_runs(
         in_yaml: Path,
         run_dir: Path,
+        yaml_injection: bool = False,
         gamma: float = 0.99,
         sp: float = 1e-2,
         behaviour_name: str = "OctagonAgentSolo",
@@ -382,7 +383,7 @@ def sequential_runs(
         simulate: bool = False,
         n_envs: int = 1,
         n_steps: int = 5,
-        seed: int | None = None,
+        seed: int | None = 17,
         extra_args: list[str] | None = None,
 ):
     '''
@@ -403,19 +404,23 @@ def sequential_runs(
         
         run_id = f"{base_run_id}_{run_id_offset + i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
         # patched_yaml_path = run_dir / f"Config_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
-        patched_yaml_path = in_yaml # Do not alter the input yaml file
+        yaml_filename = in_yaml.name # get the filename from the input yaml path, e.g. "SoloConfig.yaml"
+        patched_yaml_path = run_dir / yaml_filename # create a unique patched yaml file for each run
         train_port = 5005 + 20 * i
         sim_port   = 5015 + 20 * i  
 
-        # # this function replaces the placeholders in the yaml file with the sampled parameters
-        # patch_agents_yaml(
-        #     template_yaml=in_yaml,
-        #     output_yaml=patched_yaml_path,
-        #     gamma=gamma,
-        #     step_penalty=sp,
-        #     behaviour_name=behaviour_name,
-        #     extrinsic_reward_key="extrinsic",
-        # )
+        if yaml_injection:
+            # this function replaces the placeholders in the yaml file with the sampled parameters
+            patch_agents_yaml(
+                template_yaml=in_yaml,
+                output_yaml=patched_yaml_path,
+                gamma=gamma,
+                step_penalty=sp,
+                behaviour_name=behaviour_name,
+                extrinsic_reward_key="extrinsic",
+            )
+        else:
+            patched_yaml_path = in_yaml # if yaml_injection is False, use the original yaml file for all runs without patching
 
         print(f"patched yaml for run {run_id} with gamma={gamma} and step_penalty={sp} to {patched_yaml_path}")
 
@@ -433,31 +438,33 @@ def sequential_runs(
             extra_args=extra_args
         )
 
-        if simulate == True:
-            print(f"launching inference for run {run_id}")
-            # this function launches one inference run using the trained model from the training run
-            # specify the number of steps to run 
-            # the random seed is not currently implemented in the inference code, but it is included here for future use
-            try:
-                launch_inference_sim(
-                    run_dir=run_dir,
-                    unity_env_path=unity_build,
-                    patched_yaml_path=patched_yaml_path.resolve(),
-                    train_run_id=run_id,
-                    out_path=run_dir / "simulations" / f"sim_{run_id}",
-                    episodes=n_eps,
-                    base_port=sim_port,
-                    seed=seed,
-                )
+        # if simulate == True:
+        #     print(f"launching inference for run {run_id}")
+        #     # this function launches one inference run using the trained model from the training run
+        #     # specify the number of steps to run 
+        #     # the random seed is not currently implemented in the inference code, but it is included here for future use
+        #     try:
+        #         launch_inference_sim(
+        #             run_dir=run_dir,
+        #             unity_env_path=unity_build,
+        #             patched_yaml_path=patched_yaml_path.resolve(),
+        #             train_run_id=run_id,
+        #             out_path=run_dir / "simulations" / f"sim_{run_id}",
+        #             episodes=n_eps,
+        #             base_port=sim_port,
+        #             seed=seed,
+        #         )
                 
-            except TimeoutError as e:
-                print(f"[WARNING] Simulation timed out for {run_id}: {e}")
-                print("[WARNING] Continuing to next model.")
-            except Exception as e:
-                print(f"[WARNING] Simulation failed for {run_id}: {type(e).__name__}: {e}")
-                print("[WARNING] Continuing to next model.")
+        #     except TimeoutError as e:
+        #         print(f"[WARNING] Simulation timed out for {run_id}: {e}")
+        #         print("[WARNING] Continuing to next model.")
+        #     except Exception as e:
+        #         print(f"[WARNING] Simulation failed for {run_id}: {type(e).__name__}: {e}")
+        #         print("[WARNING] Continuing to next model.")
 
         time.sleep(5)
+
+
 
 
 def sbi_simulator(
