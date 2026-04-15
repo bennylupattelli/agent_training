@@ -23,7 +23,7 @@ Note: For Linux use the unity_env_path needs to point to the .x86_64 file (the b
 def sample_first_thetas(
         N: int,
         gamma_range=(0.95, 0.9999),
-        sp_range=(1e-5, 1e-3),
+        sp_range=(2.5e-6, 4e-3),
         device="cpu",
 ):
     '''
