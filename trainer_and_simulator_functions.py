@@ -351,7 +351,7 @@ def launch_inference_sim(run_dir: Path,
         "--no-graphics",                 
         "--env-args",
         "--sim_out", str(out_path.resolve()),
-        "--sim_eps", str(eps),
+        "--sim_eps", str(episodes),
     ]
 
     if seed is not None:
