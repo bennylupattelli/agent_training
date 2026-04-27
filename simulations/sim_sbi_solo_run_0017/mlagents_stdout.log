@@ -1,0 +1,33 @@
+Traceback (most recent call last):
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\Scripts\mlagents-learn.exe\__main__.py", line 4, in <module>
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents\trainers\learn.py", line 2, in <module>
+    from mlagents import torch_utils
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents\torch_utils\__init__.py", line 1, in <module>
+    from mlagents.torch_utils.torch import torch as torch  # noqa
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents\torch_utils\torch.py", line 6, in <module>
+    from mlagents.trainers.settings import TorchSettings
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents\trainers\settings.py", line 25, in <module>
+    from mlagents.trainers.cli_utils import StoreConfigFile, DetectDefault, parser
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents\trainers\cli_utils.py", line 5, in <module>
+    from mlagents_envs.environment import UnityEnvironment
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents_envs\environment.py", line 12, in <module>
+    from mlagents_envs.side_channel.side_channel import SideChannel
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents_envs\side_channel\__init__.py", line 5, in <module>
+    from mlagents_envs.side_channel.default_training_analytics_side_channel import (  # noqa
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents_envs\side_channel\default_training_analytics_side_channel.py", line 7, in <module>
+    from mlagents_envs.communicator_objects.training_analytics_pb2 import (
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents_envs\communicator_objects\training_analytics_pb2.py", line 35, in <module>
+    _descriptor.FieldDescriptor(
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\google\protobuf\descriptor.py", line 553, in __new__
+    _message.Message._CheckCalledFromGeneratedFile()
+TypeError: Descriptors cannot be created directly.
+If this call came from a _pb2.py file, your generated code is out of date and must be regenerated with protoc >= 3.19.0.
+If you cannot immediately regenerate your protos, some other possible workarounds are:
+ 1. Downgrade the protobuf package to 3.20.x or lower.
+ 2. Set PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python (but this will use pure-Python parsing and will be much slower).
+
+More information: https://developers.google.com/protocol-buffers/docs/news/2022-05-06#python-updates

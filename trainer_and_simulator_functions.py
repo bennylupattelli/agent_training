@@ -23,7 +23,7 @@ Note: For Linux use the unity_env_path needs to point to the .x86_64 file (the b
 def sample_first_thetas(
         N: int,
         gamma_range=(0.95, 0.9999),
-        sp_range=(1e-5, 1e-3),
+        sp_range=(2.5e-6, 4e-3),
         device="cpu",
 ):
     '''
@@ -317,7 +317,7 @@ def launch_inference_sim(run_dir: Path,
                 patched_yaml_path: Path,
                 train_run_id: str,
                 out_path: Path,
-                steps: int,
+                episodes: int,
                 base_port: int,
                 timeout_s: int = 5000, # more time is needed for more than 100 episodes
                 seed: int | None = None,
@@ -353,7 +353,7 @@ def launch_inference_sim(run_dir: Path,
         "--no-graphics",                 
         "--env-args",
         "--sim_out", str(out_path.resolve()),
-        "--sim_steps", str(steps),
+        "--sim_eps", str(episodes),
     ]
 
     if seed is not None:
@@ -396,7 +396,7 @@ def sequential_runs(
     device = torch device for training (e.g., "cpu" or "cuda:0")
     n_models = number of agents (models) to train sequentially
     n_envs = number of parallel environments to use for training (e.g., 1, 2, 4, etc.)
-    n_steps = number of steps to run for each simulation in the inference step (e.g., 1000, 10000, 100000, etc.)
+    n_eps = number of episodes to run for each simulation in the inference step (e.g., 1000, 10000, 100000, etc.)
     '''
     
     run_dir = Path(run_dir)
@@ -440,29 +440,29 @@ def sequential_runs(
             extra_args=extra_args
         )
 
-        # if simulate == True:
-        #     print(f"launching inference for run {run_id}")
-        #     # this function launches one inference run using the trained model from the training run
-        #     # specify the number of steps to run 
-        #     # the random seed is not currently implemented in the inference code, but it is included here for future use
-        #     try:
-        #         launch_inference_sim(
-        #             run_dir=run_dir,
-        #             unity_env_path=unity_build,
-        #             patched_yaml_path=patched_yaml_path.resolve(),
-        #             train_run_id=run_id,
-        #             out_path=run_dir / "simulations" / f"sim_{run_id}",
-        #             episodes=n_eps,
-        #             base_port=sim_port,
-        #             seed=seed,
-        #         )
+        if simulate == True:
+            print(f"launching inference for run {run_id}")
+            # this function launches one inference run using the trained model from the training run
+            # specify the number of steps to run 
+            # the random seed is not currently implemented in the inference code, but it is included here for future use
+            try:
+                launch_inference_sim(
+                    run_dir=run_dir,
+                    unity_env_path=unity_build,
+                    patched_yaml_path=patched_yaml_path.resolve(),
+                    train_run_id=run_id,
+                    out_path=run_dir / "simulations" / f"sim_{run_id}",
+                    episodes=n_eps,
+                    base_port=sim_port,
+                    seed=seed,
+                )
                 
-        #     except TimeoutError as e:
-        #         print(f"[WARNING] Simulation timed out for {run_id}: {e}")
-        #         print("[WARNING] Continuing to next model.")
-        #     except Exception as e:
-        #         print(f"[WARNING] Simulation failed for {run_id}: {type(e).__name__}: {e}")
-        #         print("[WARNING] Continuing to next model.")
+            except TimeoutError as e:
+                print(f"[WARNING] Simulation timed out for {run_id}: {e}")
+                print("[WARNING] Continuing to next model.")
+            except Exception as e:
+                print(f"[WARNING] Simulation failed for {run_id}: {type(e).__name__}: {e}")
+                print("[WARNING] Continuing to next model.")
 
         time.sleep(5)
 
@@ -481,13 +481,13 @@ def sbi_simulator(
         device: str = "cpu",
         simulate: bool = False,
         n_envs: int = 1,
-        n_steps: int = 5,
+        n_eps: int = 5,
         seed: int | None = None,
 ):
     '''Umbrella function to run the whole pipeline with one command:
     1. Sample N batches of parameters from the prior distribution
     2. For each batch of parameters, patch the template yaml file and launch a training run with the patched yaml and Unity environment build
-    3. After each training run, launch an inference run using the trained model from the training run, specifying the number of steps to run and the random seed for future use (currently not implemented in the inference code)'''
+    3. After each training run, launch an inference run using the trained model from the training run, specifying the number of episodes to run and the random seed for future use (currently not implemented in the inference code)'''
     
     run_dir = Path(run_dir)
     in_yaml = Path(in_yaml)
@@ -531,7 +531,7 @@ def sbi_simulator(
 
         if simulate == True:
             # this function launches one inference run using the trained model from the training run
-            # specify the number of steps to run 
+            # specify the number of episodes to run 
             # the random seed is not currently implemented in the inference code, but it is included here for future use
             try:
                 launch_inference_sim(
@@ -539,7 +539,7 @@ def sbi_simulator(
                     unity_env_path=unity_build,
                     patched_yaml_path=patched_yaml_path.resolve(),
                     train_run_id=run_id,
-                    out_path=run_dir / "simulations" / f"sim_{run_id}",
+                    out_path=work_dir / "simulations" / f"sim_{run_id}",
                     episodes=n_eps,
                     base_port=sim_port,
                     seed=seed,

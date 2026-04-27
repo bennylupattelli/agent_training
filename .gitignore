@@ -43,6 +43,12 @@ summaries/
 runs/
 
 # =========================
+# ML-Agents / simulation outputs
+# =========================
+simulations/
+Data/
+
+# =========================
 # VS / IDE
 # =========================
 .vscode/

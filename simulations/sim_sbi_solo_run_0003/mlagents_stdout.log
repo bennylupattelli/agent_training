@@ -1,0 +1,154 @@
+
+            ┐  ╖
+        ╓╖╬│╡  ││╬╖╖
+    ╓╖╬│││││┘  ╬│││││╬╖
+ ╖╬│││││╬╜        ╙╬│││││╖╖                               ╗╗╗
+ ╬╬╬╬╖││╦╖        ╖╬││╗╣╣╣╬      ╟╣╣╬    ╟╣╣╣             ╜╜╜  ╟╣╣
+ ╬╬╬╬╬╬╬╬╖│╬╖╖╓╬╪│╓╣╣╣╣╣╣╣╬      ╟╣╣╬    ╟╣╣╣ ╒╣╣╖╗╣╣╣╗   ╣╣╣ ╣╣╣╣╣╣ ╟╣╣╖   ╣╣╣
+ ╬╬╬╬┐  ╙╬╬╬╬│╓╣╣╣╝╜  ╫╣╣╣╬      ╟╣╣╬    ╟╣╣╣ ╟╣╣╣╙ ╙╣╣╣  ╣╣╣ ╙╟╣╣╜╙  ╫╣╣  ╟╣╣
+ ╬╬╬╬┐     ╙╬╬╣╣      ╫╣╣╣╬      ╟╣╣╬    ╟╣╣╣ ╟╣╣╬   ╣╣╣  ╣╣╣  ╟╣╣     ╣╣╣┌╣╣╜
+ ╬╬╬╜       ╬╬╣╣      ╙╝╣╣╬      ╙╣╣╣╗╖╓╗╣╣╣╜ ╟╣╣╬   ╣╣╣  ╣╣╣  ╟╣╣╦╓    ╣╣╣╣╣
+ ╙   ╓╦╖    ╬╬╣╣   ╓╗╗╖            ╙╝╣╣╣╣╝╜   ╘╝╝╜   ╝╝╝  ╝╝╝   ╙╣╣╣    ╟╣╣╣
+   ╩╬╬╬╬╬╬╦╦╬╬╣╣╗╣╣╣╣╣╣╣╝                                             ╫╣╣╣╣
+      ╙╬╬╬╬╬╬╬╣╣╣╣╣╣╝╜
+          ╙╬╬╬╣╣╣╜
+             ╙
+        
+ Version information:
+  ml-agents: 1.1.0,
+  ml-agents-envs: 1.1.0,
+  Communicator API: 1.5.0,
+  PyTorch: 2.2.2+cu118
+[INFO] Connected to Unity environment with package version 3.0.0-exp.1 and communication version 1.5.0
+[INFO] Connected new brain: OctagonAgentSolo?team=0
+[INFO] Hyperparameters for behavior name OctagonAgentSolo: 
+	trainer_type:	ppo
+	hyperparameters:	
+	  batch_size:	512
+	  buffer_size:	10240
+	  learning_rate:	0.0003
+	  beta:	0.005
+	  epsilon:	0.2
+	  lambd:	0.95
+	  num_epoch:	3
+	  shared_critic:	False
+	  learning_rate_schedule:	linear
+	  beta_schedule:	linear
+	  epsilon_schedule:	linear
+	checkpoint_interval:	100000
+	network_settings:	
+	  normalize:	False
+	  hidden_units:	512
+	  num_layers:	2
+	  vis_encode_type:	simple
+	  memory:	
+	    sequence_length:	64
+	    memory_size:	256
+	  goal_conditioning_type:	hyper
+	  deterministic:	False
+	reward_signals:	
+	  extrinsic:	
+	    gamma:	0.99
+	    strength:	1.0
+	    network_settings:	
+	      normalize:	False
+	      hidden_units:	128
+	      num_layers:	2
+	      vis_encode_type:	simple
+	      memory:	None
+	      goal_conditioning_type:	hyper
+	      deterministic:	False
+	  rnd:	
+	    gamma:	0.99
+	    strength:	0.01
+	    network_settings:	
+	      normalize:	False
+	      hidden_units:	128
+	      num_layers:	2
+	      vis_encode_type:	simple
+	      memory:	None
+	      goal_conditioning_type:	hyper
+	      deterministic:	False
+	    learning_rate:	0.0001
+	    encoding_size:	None
+	init_path:	None
+	keep_checkpoints:	30
+	even_checkpoints:	False
+	max_steps:	3000000
+	time_horizon:	128
+	summary_freq:	20000
+	threaded:	False
+	self_play:	None
+	behavioral_cloning:	None
+[INFO] Resuming from results\sbi_solo_run_0003\OctagonAgentSolo.
+[INFO] Resuming training from step 3000126.
+[INFO] Parameter 'step_penalty' is in lesson 'step_penalty' and has value 'Float: value=0.001046280493028462'.
+[INFO] OctagonAgentSolo. Step: 3020000. Time Elapsed: 337.386 s. Mean Reward: 0.545. Std of Reward: 0.054. Not Training.
+[INFO] OctagonAgentSolo. Step: 3040000. Time Elapsed: 662.569 s. Mean Reward: 0.522. Std of Reward: 0.048. Not Training.
+[INFO] OctagonAgentSolo. Step: 3060000. Time Elapsed: 990.400 s. Mean Reward: 0.536. Std of Reward: 0.048. Not Training.
+[INFO] OctagonAgentSolo. Step: 3080000. Time Elapsed: 1316.428 s. Mean Reward: 0.520. Std of Reward: 0.046. Not Training.
+[INFO] OctagonAgentSolo. Step: 3100000. Time Elapsed: 1646.641 s. Mean Reward: 0.528. Std of Reward: 0.057. Not Training.
+C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\torch\onnx\symbolic_opset9.py:4662: UserWarning: Exporting a model to ONNX with a batch_size other than 1, with a variable length with LSTM can cause an error when running the ONNX model with a different batch size. Make sure to save the model with a batch size of 1, or define the initial states (h0/c0) as inputs of the model. 
+  warnings.warn(
+[INFO] Exported results\sbi_solo_run_0003\OctagonAgentSolo\OctagonAgentSolo-3099890.onnx
+[INFO] OctagonAgentSolo. Step: 3120000. Time Elapsed: 1971.639 s. Mean Reward: 0.539. Std of Reward: 0.047. Not Training.
+[INFO] OctagonAgentSolo. Step: 3140000. Time Elapsed: 2303.450 s. Mean Reward: 0.527. Std of Reward: 0.052. Not Training.
+[INFO] OctagonAgentSolo. Step: 3160000. Time Elapsed: 2631.059 s. Mean Reward: 0.533. Std of Reward: 0.051. Not Training.
+[INFO] OctagonAgentSolo. Step: 3180000. Time Elapsed: 2960.294 s. Mean Reward: 0.521. Std of Reward: 0.052. Not Training.
+[INFO] OctagonAgentSolo. Step: 3200000. Time Elapsed: 3290.684 s. Mean Reward: 0.535. Std of Reward: 0.043. Not Training.
+[INFO] Exported results\sbi_solo_run_0003\OctagonAgentSolo\OctagonAgentSolo-3199933.onnx
+[INFO] OctagonAgentSolo. Step: 3220000. Time Elapsed: 3620.332 s. Mean Reward: 0.538. Std of Reward: 0.050. Not Training.
+[INFO] OctagonAgentSolo. Step: 3240000. Time Elapsed: 3948.415 s. Mean Reward: 0.536. Std of Reward: 0.044. Not Training.
+[INFO] OctagonAgentSolo. Step: 3260000. Time Elapsed: 4274.574 s. Mean Reward: 0.528. Std of Reward: 0.049. Not Training.
+[INFO] OctagonAgentSolo. Step: 3280000. Time Elapsed: 4599.680 s. Mean Reward: 0.525. Std of Reward: 0.049. Not Training.
+[INFO] OctagonAgentSolo. Step: 3300000. Time Elapsed: 4931.351 s. Mean Reward: 0.536. Std of Reward: 0.052. Not Training.
+[INFO] Exported results\sbi_solo_run_0003\OctagonAgentSolo\OctagonAgentSolo-3299932.onnx
+[ERROR] UnityEnvironment worker 0: environment raised an unexpected exception.
+Traceback (most recent call last):
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\multiprocessing\connection.py", line 301, in _recv_bytes
+    ov, err = _winapi.ReadFile(self._handle, bsize,
+BrokenPipeError: [WinError 109] The pipe has been ended
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents\trainers\subprocess_env_manager.py", line 175, in worker
+    req: EnvironmentRequest = parent_conn.recv()
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\multiprocessing\connection.py", line 250, in recv
+    buf = self._recv_bytes()
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\multiprocessing\connection.py", line 321, in _recv_bytes
+    raise EOFError
+EOFError
+Process Process-1:
+Traceback (most recent call last):
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\multiprocessing\connection.py", line 301, in _recv_bytes
+    ov, err = _winapi.ReadFile(self._handle, bsize,
+BrokenPipeError: [WinError 109] The pipe has been ended
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents\trainers\subprocess_env_manager.py", line 175, in worker
+    req: EnvironmentRequest = parent_conn.recv()
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\multiprocessing\connection.py", line 250, in recv
+    buf = self._recv_bytes()
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\multiprocessing\connection.py", line 321, in _recv_bytes
+    raise EOFError
+EOFError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents\trainers\subprocess_env_manager.py", line 235, in worker
+    _send_response(EnvironmentCommand.ENV_EXITED, ex)
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\site-packages\mlagents\trainers\subprocess_env_manager.py", line 150, in _send_response
+    parent_conn.send(EnvironmentResponse(cmd_name, worker_id, payload))
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\multiprocessing\connection.py", line 206, in send
+    self._send_bytes(_ForkingPickler.dumps(obj))
+  File "C:\Users\Benedetta\miniconda3\envs\mlagents\lib\multiprocessing\connection.py", line 280, in _send_bytes
+    ov, err = _winapi.WriteFile(self._handle, buf, overlapped=True)
+BrokenPipeError: [WinError 232] The pipe is being closed
