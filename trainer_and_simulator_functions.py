@@ -53,6 +53,7 @@ def sample_first_thetas(
 
 def patch_agents_yaml(
         template_yaml: str | Path,
+        output_yaml: str | Path,
         run_dir: str | Path,
         gamma: float = 0.99,
         step_penalty: float = 1e-2,
@@ -79,7 +80,7 @@ def patch_agents_yaml(
     '''
 
     template_yaml = Path(template_yaml)
-    output_yaml = run_dir / "SoloConfig.yaml"
+    output_yaml = Path(output_yaml)
     output_yaml.parent.mkdir(parents=True, exist_ok=True) # creates a directory at the specified path, including any necessary parent directories.
 
     with template_yaml.open("r") as f:
