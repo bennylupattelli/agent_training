@@ -311,7 +311,7 @@ def run_eval(cmd, out_path: Path, poll_s=0.2, timeout_s=300, cwd: Path | None = 
 
 
 
-
+# Note that running inference can also take a seed. I'm just going to default set this to 17 for now 
 def launch_inference_sim(run_dir: Path,
                 unity_env_path: Path,
                 patched_yaml_path: Path,
@@ -320,7 +320,7 @@ def launch_inference_sim(run_dir: Path,
                 episodes: int,
                 base_port: int,
                 timeout_s: int = 5000, # more time is needed for more than 100 episodes
-                seed: int | None = None,
+                seed: int | None = 17,
                 ):
     '''3) Launch unity mlagents-learn in inference mode for simulations.'''
 
