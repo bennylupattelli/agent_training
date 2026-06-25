@@ -23,7 +23,7 @@ Note: For Linux use the unity_env_path needs to point to the .x86_64 file (the b
 def sample_first_thetas(
         N: int,
         gamma_range=(0.95, 0.9999),
-        sp_range=(2.5e-6, 4e-3),
+        sp_range=(1e-4, 1e-3),
         device="cpu",
 ):
     '''
@@ -49,11 +49,94 @@ def sample_first_thetas(
 
     return theta
 
+def sample_split_cost(
+        #ratio_range,
+        move_range=(0.00025, 0.004),
+        turn_range=(0.00025, 0.004),
+        n = 25,
+        distribution="even_steps",
+        seed=None,
+):
+    '''
+    (not implemented: Ratio range determines the relative size of each parameter with respect to the other.)
+    n is the number of samples for each parameter which will result in a n*n total samples.
+    Move and turn ranges determine the absolute lower and upper ceilings for each parameter.
+    Distribution argument determines how the parameter values are sampled:
+        at even ratio steps,
+        randomly via uniform distribution,
+        randomly via log distribution
+    '''
+
+    rng = np.random.default_rng(seed)
+
+    #r0, r1 = ratio_range
+    m0, m1 = move_range
+    t0, t1 = turn_range
+
+    if m0 <= 0 or m1 <= 0 or t0 <= 0 or t1 <= 0:
+        raise ValueError("Cost ranges must be positive.")
+
+    if m0 >= m1 or t0 >= t1:
+        raise ValueError("Each range must be ordered as (lower, upper).")
+
+    if distribution=="even_steps":
+
+        n_per_dim = int(np.sqrt(n))
+
+        if n_per_dim ** 2 != n:
+            raise ValueError(
+                "For even steps, n must be a perfect square"
+            )
+
+        translation_costs = np.linspace(m0, m1, n_per_dim)
+        turning_costs = np.linspace(t0, t1, n_per_dim)
+        
+        theta = np.array([
+        [tc,rc]
+        for tc in translation_costs
+        for rc in turning_costs
+        ])
+    
+    elif distribution=="uniform":
+
+        translation_costs = rng.uniform(m0, m1, n)
+        turning_costs = rng.uniform(t0, t1, n)
+
+        theta = np.column_stack([
+            translation_costs,
+            turning_costs
+        ])
+    
+    elif distribution=="log_uniform":
+
+        translation_costs = np.exp(
+            rng.uniform(np.log(m0), np.log(m1), n)
+        )
+
+        turning_costs = np.exp(
+            rng.uniform(np.log(t0), np.log(t1), n)
+        )
+
+        theta = np.column_stack([
+            translation_costs,
+            turning_costs
+        ])
+    
+    else:
+        raise ValueError(
+            f"Unknown distribution '{distribution}'. "
+            "Choose from: even_steps, uniform, log_uniform"
+        )
+
+    return theta
 
 
 def patch_agents_yaml(
         template_yaml: str | Path,
         output_yaml: str | Path,
+        split_cost: bool,
+        translation_cost: float,
+        turning_cost: float,
         gamma: float = 0.99,
         step_penalty: float = 1e-2,
         behaviour_name: str | None = None,
@@ -64,6 +147,8 @@ def patch_agents_yaml(
     2) Load yaml file for agents and patch gamma.
     template_yaml: path to yaml file,
     output_yaml: path to write the patched yaml file,
+    translation_cost: penalty for each translational movement step,
+    turning_cost: penalty for each rotational movement step,
     gamma: PPO discount,
     step_penalty: penalty for each step taken,
     behaviour_name: name of the behaviour to patch, if None patch all behaviours,
@@ -98,9 +183,16 @@ def patch_agents_yaml(
     if missing:
         raise KeyError(f"Behaviours not found in yaml file: {missing}. Found: {list(behaviours.keys())}")
     
-    if "step_penalty" not in env_parameters:
-        raise KeyError("Missing environment parameter 'step_penalty'")
+    if not split_cost:
+        if "step_penalty" not in env_parameters:
+            raise KeyError("Missing environment parameter 'step_penalty'")
+    if split_cost:
+        if "translation_cost" not in env_parameters:
+            raise KeyError("Missing environment parameter 'translation_cost'")   
 
+        if "turning_cost" not in env_parameters:
+            raise KeyError("Missing environment parameter 'turning_cost'")   
+    
     for b in target_behaviours:
         bcfg = behaviours[b]
 
@@ -120,9 +212,15 @@ def patch_agents_yaml(
         extrinsic_cfg["gamma"] = float(gamma)
 
     for p in env_parameters:
-        if p == "step_penalty":
-            env_parameters[p] = float(step_penalty)
-            
+        if not split_cost:
+            if p == "step_penalty":
+                env_parameters[p] = float(step_penalty)
+        if split_cost:
+            if p == "translation_cost":
+                env_parameters[p] = float(translation_cost)
+            if p == "turning_cost":
+                env_parameters[p] = float(turning_cost)          
+      
     with output_yaml.open("w") as f:
         yaml.dump(cfg, f)
 
@@ -463,7 +561,7 @@ def sequential_runs(
 def sbi_simulator(
         n: int,
         in_yaml: Path,
-        run_dir: Path,
+        #run_dir: Path,
         work_dir: Path,
         behaviour_name: str = "OctagonAgentSolo",
         unity_build: Path = Path("/Users/benny/Builds/OctagonAgentSolo.app"),
@@ -474,40 +572,80 @@ def sbi_simulator(
         n_envs: int = 1,
         n_eps: int = 5,
         seed: int | None = None,
+        step_penalty=False,
+        split_penalty=False
 ):
     '''Umbrella function to run the whole pipeline with one command:
     1. Sample N batches of parameters from the prior distribution
     2. For each batch of parameters, patch the template yaml file and launch a training run with the patched yaml and Unity environment build
     3. After each training run, launch an inference run using the trained model from the training run, specifying the number of episodes to run and the random seed for future use (currently not implemented in the inference code)'''
     
-    run_dir = Path(run_dir)
-    in_yaml = Path(in_yaml)
-    work_dir = Path(work_dir)
+    #run_dir = Path(run_dir)
+    work_dir = Path(work_dir).resolve()
+    in_yaml = Path(in_yaml).resolve()
+    unity_build = Path(unity_build).resolve()
 
-    thetas = sample_first_thetas(n) # output is (n, 2) np array
+    config_dir = work_dir / "configs"
+    #results_dir = work_dir / "results"
+    simulations_dir = work_dir / "simulations"
+    #logs_dir = work_dir / "logs"
 
+    for d in [config_dir, simulations_dir]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    if step_penalty and split_penalty:
+        raise ValueError("Choose only one: step_penalty or split_penalty.")
+    
+    if step_penalty:
+        thetas = sample_first_thetas(n) # output is (n, 2) np array
+    elif split_penalty:
+        thetas = sample_split_cost(n=n, seed=seed)
+    else:
+        raise ValueError(
+            f"Desired parameter not given. Step penalty is '{step_penalty}', split penalty is '{split_penalty}'"
+            "Choose from: step_penalty=True or step_penalty=False"
+        )
     #print(f"Sampled thetas:\n{thetas}")
 
     # get N batches of parameter values from the prior distribution
-    for i in range(n):
-        _, sp = map(float, thetas[i]) # convert tensor values to floats for yaml patching
+    for i, theta in enumerate(thetas):
 
         run_id = f"{base_run_id}_{i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
-        patched_yaml_path = run_dir / f"SoloConfig_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
+        
+        patched_yaml_path = config_dir / f"SoloConfig_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
 
         train_port = 5005 + 20 * i
         sim_port   = 5015 + 20 * i
 
-        # this function replaces the placeholders in the yaml file with the sampled parameters
-        patch_agents_yaml(
-            template_yaml=in_yaml,
-            output_yaml=patched_yaml_path,
-            gamma=0.99,
-            step_penalty=sp,
-            behaviour_name=behaviour_name,
-            extrinsic_reward_key="extrinsic"
-        )
-    
+        if step_penalty:
+            _, sp = map(float, theta) # convert tensor values to floats for yaml patching
+
+            # this function replaces the placeholders in the yaml file with the sampled parameters
+            patch_agents_yaml(
+                template_yaml=in_yaml,
+                output_yaml=patched_yaml_path,
+                split_cost=False,
+                gamma=0.99,
+                step_penalty=sp,
+                behaviour_name=behaviour_name,
+                extrinsic_reward_key="extrinsic"
+            )
+
+        elif split_penalty:
+            tc, rc = map(float, theta) 
+        
+            # this function replaces the placeholders in the yaml file with the sampled parameters
+            patch_agents_yaml(
+                template_yaml=in_yaml,
+                output_yaml=patched_yaml_path,
+                split_cost=True,
+                translation_cost=tc,
+                turning_cost=rc,
+                gamma=0.99,
+                behaviour_name=behaviour_name,
+                extrinsic_reward_key="extrinsic"
+            )
+
         # this function launches one training run with the specified yaml file and Unity environment build
         launch_training(
             patched_yaml=patched_yaml_path,
@@ -520,7 +658,7 @@ def sbi_simulator(
             cwd=work_dir,
         )
 
-        if simulate == True:
+        if simulate:
             # this function launches one inference run using the trained model from the training run
             # specify the number of episodes to run 
             # the random seed is not currently implemented in the inference code, but it is included here for future use
@@ -528,9 +666,9 @@ def sbi_simulator(
                 launch_inference_sim(
                     run_dir=work_dir,
                     unity_env_path=unity_build,
-                    patched_yaml_path=patched_yaml_path.resolve(),
+                    patched_yaml_path=patched_yaml_path,
                     train_run_id=run_id,
-                    out_path=work_dir / "simulations" / f"sim_{run_id}",
+                    out_path=simulations_dir/f"sim_{run_id}",
                     episodes=n_eps,
                     base_port=sim_port,
                     seed=seed,
