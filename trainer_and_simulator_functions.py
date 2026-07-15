@@ -321,8 +321,17 @@ def launch_inference_sim(run_dir: Path,
                 base_port: int,
                 timeout_s: int = 5000, # more time is needed for more than 100 episodes
                 seed: int | None = 17,
+                deterministic: bool = False,
+                trial_seq: Path | str | None = None,
                 ):
-    '''3) Launch unity mlagents-learn in inference mode for simulations.'''
+    '''3) Launch unity mlagents-learn in inference mode for simulations.
+    deterministic: if True, pass --deterministic so the policy selects greedy
+    actions (dist.argmax). Used by the tournament so trial variation comes only
+    from the stochastic arena, not action sampling.
+    trial_seq: optional path to a predetermined trial-sequence JSON (see
+    trial_sequences/generate_trial_sequence.py). When given, the Unity build
+    replays that exact string of trials and stops once it is exhausted, so every
+    model sees identical trials. When None, the build generates trials randomly.'''
 
     run_dir = Path(run_dir)
     unity_env_path = Path(unity_env_path)
@@ -334,7 +343,7 @@ def launch_inference_sim(run_dir: Path,
     if not unity_env_path.exists():
         raise FileNotFoundError(f"unity_env_path not found")
         
-    results_dir = run_dir / train_run_id
+    results_dir = run_dir / "results" / train_run_id
     if not results_dir.exists():
         raise FileNotFoundError(f"results dir not found: {results_dir}")
 
@@ -345,16 +354,26 @@ def launch_inference_sim(run_dir: Path,
     cmd = [
         "mlagents-learn",
         str(patched_yaml_path),
-        "--run-id", train_run_id,          
+        "--run-id", train_run_id,
         "--resume",
         "--inference",
         "--base-port", str(base_port),
+        # --deterministic must precede --env-args (which consumes all remaining args)
+        *(["--deterministic"] if deterministic else []),
         "--env", str(unity_env_path),
         "--no-graphics",                 
         "--env-args",
         "--sim_out", str(out_path.resolve()),
         "--sim_eps", str(episodes),
     ]
+
+    # Predetermined trial sequence (optional). Passed through --env-args so the
+    # Unity build reads it via GetCommandLineArgs(); absence => random trials.
+    if trial_seq is not None:
+        trial_seq = Path(trial_seq).resolve()
+        if not trial_seq.exists():
+            raise FileNotFoundError(f"trial_seq file not found: {trial_seq}")
+        cmd.extend(["--trial_seq", str(trial_seq)])
 
     if seed is not None:
         cmd.extend(["--seed", str(seed)])
