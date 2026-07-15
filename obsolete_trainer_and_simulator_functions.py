@@ -255,6 +255,10 @@ def launch_training(
 
     # build the command-line invocation
     cmd = [
+        #"xvfb-run",
+        #"-a",
+        #"-s",
+        #"-screen 0 1280x1024x24",
         "mlagents-learn", # executable
         str(patched_yaml), # path to the yaml config
         "--env", str(unity_env_path), # points to the compiled unity environment
@@ -263,6 +267,7 @@ def launch_training(
         "--no-graphics", # headless mode
         "--run-id", run_id, # specify run id
         "--base-port", str(base_port),
+        "--timeout-wait", "300",
         "--force",
     ]
 

@@ -1,5 +1,5 @@
 from pathlib import Path
-import trainer_and_simulator_functions as trainer
+import full_simulator_functions as trainer
 
 
 in_yaml = Path("/ceph/scratch/bgenca/octagon/template_yaml/SplitCostSolo.yaml")
@@ -19,7 +19,7 @@ trainer.sbi_simulator(
     work_dir = work_dir,
     unity_build = unity_env_path,
     base_run_id = "split_cost_hpc",
-    device = "gpu",
+    device = "cuda:0",
     simulate = True,
     n_eps = 1000,
     n_envs = 1,
