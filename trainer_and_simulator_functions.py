@@ -573,7 +573,8 @@ def sbi_simulator(
         n_eps: int = 5,
         seed: int | None = None,
         step_penalty=False,
-        split_penalty=False
+        split_penalty=False,
+        input_split_theta=None
 ):
     '''Umbrella function to run the whole pipeline with one command:
     1. Sample N batches of parameters from the prior distribution
@@ -598,8 +599,10 @@ def sbi_simulator(
     
     if step_penalty:
         thetas = sample_first_thetas(n) # output is (n, 2) np array
-    elif split_penalty:
+    elif split_penalty and input_split_theta is None:
         thetas = sample_split_cost(n=n, seed=seed)
+    elif split_penalty and input_split_theta is not None:
+        thetas = input_split_theta
     else:
         raise ValueError(
             f"Desired parameter not given. Step penalty is '{step_penalty}', split penalty is '{split_penalty}'"

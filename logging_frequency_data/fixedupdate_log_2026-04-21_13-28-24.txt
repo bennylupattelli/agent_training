@@ -1,0 +1,17 @@
+FixedUpdate Hz: 29.47
+FixedUpdate Hz: 49.34
+FixedUpdate Hz: 49.35
+FixedUpdate Hz: 47.57
+FixedUpdate Hz: 51.38
+FixedUpdate Hz: 48.38
+FixedUpdate Hz: 48.56
+FixedUpdate Hz: 47.22
+FixedUpdate Hz: 50.10
+FixedUpdate Hz: 45.22
+FixedUpdate Hz: 51.29
+FixedUpdate Hz: 46.45
+FixedUpdate Hz: 51.63
+FixedUpdate Hz: 46.92
+FixedUpdate Hz: 50.86
+FixedUpdate Hz: 47.74
+FixedUpdate Hz: 49.10

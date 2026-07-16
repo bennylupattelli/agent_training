@@ -41,6 +41,8 @@ models/
 summaries/
 *.onnx
 runs/
+configs/
+logging_frequency_data/
 
 # =========================
 # ML-Agents / simulation outputs
