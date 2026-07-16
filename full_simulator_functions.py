@@ -226,3 +226,133 @@ def sbi_simulator(
                 print("[WARNING] Continuing to next model.")
 
         time.sleep(5)
+
+
+
+from typing import Tuple
+import itertools
+import random
+import csv
+
+def split_cost_simulator_two_values(
+        values: Tuple[float, float],
+        N: int,
+        in_yaml: Path,
+        #run_dir: Path,
+        work_dir: Path,
+        behaviour_name: str = "OctagonAgentSolo",
+        unity_build: Path = Path("/Users/benny/Builds/OctagonAgentSolo.app"),
+        # IMPORTANT: for Linux use the unity_build path that points to the .x86_64 file (the build), e.g. unity_build = Path("/path/to/env.x86_64")
+        base_run_id: str = "sbi_solo_run",
+        device: str = "cpu",
+        simulate: bool = False,
+        n_envs: int = 1,
+        n_eps: int = 5,
+):
+    '''Models are trained on all combinations of the two values provided.
+        N is the number of models to be trained for each combination.
+        The seed is set randomly for every individual training run and recorded.'''
+    
+    #run_dir = Path(run_dir)
+    work_dir = Path(work_dir).resolve()
+    in_yaml = Path(in_yaml).resolve()
+    unity_build = Path(unity_build).resolve()
+
+    config_dir = work_dir / "configs"
+    #results_dir = work_dir / "results"
+    simulations_dir = work_dir / "simulations"
+    #logs_dir = work_dir / "logs"
+
+    for d in [config_dir, simulations_dir]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    manifest = work_dir / "run_manifest.csv"
+
+    # Create the file and header if it doesn't already exist
+    if not manifest.exists():
+        with open(manifest, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "run_id",
+                "seed",
+                "translation_cost",
+                "turning_cost"
+            ])
+
+    all_combinations = itertools.product(values, repeat=2)
+    thetas = list(all_combinations)
+    print(thetas)
+
+    # get N batches of parameter values from the prior distribution
+    for i, theta in enumerate(thetas):
+        
+        cofig_id = f"{base_run_id}_{i:04d}"
+        patched_yaml_path = config_dir / f"SoloConfig_{cofig_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
+
+        train_port = 5005 + 20 * i
+        sim_port   = 5015 + 20 * i
+
+        tc, rc = map(float, theta) 
+    
+        # this function replaces the placeholders in the yaml file with the sampled parameters
+        patch_agents_yaml(
+            template_yaml=in_yaml,
+            output_yaml=patched_yaml_path,
+            split_cost=True,
+            translation_cost=tc,
+            turning_cost=rc,
+            gamma=0.99,
+            behaviour_name=behaviour_name,
+            extrinsic_reward_key="extrinsic"
+        )
+
+        for j in range(N):
+
+            run_id = f"{base_run_id}_{i:04d}_{j:03d}"
+            seed = random.randint(0, 99999)
+
+            with open(manifest, "a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    run_id,
+                    seed,
+                    tc,
+                    rc
+                ])
+
+            # this function launches one training run with the specified yaml file and Unity environment build
+            launch_training(
+                patched_yaml=patched_yaml_path,
+                unity_env_path=unity_build,
+                run_id=run_id,
+                torch_device=device,
+                num_envs=n_envs,
+                base_port=train_port,
+                seed=seed,
+                cwd=work_dir,
+            )
+
+            if simulate:
+                # this function launches one inference run using the trained model from the training run
+                # specify the number of episodes to run 
+                # the random seed is not currently implemented in the inference code, but it is included here for future use
+                try:
+                    launch_inference_sim(
+                        run_dir=work_dir,
+                        unity_env_path=unity_build,
+                        patched_yaml_path=patched_yaml_path,
+                        train_run_id=run_id,
+                        out_path=simulations_dir/f"sim_{run_id}",
+                        episodes=n_eps,
+                        base_port=sim_port,
+                        seed=seed,
+                    )
+
+                except TimeoutError as e:
+                    print(f"[WARNING] Simulation timed out for {run_id}: {e}")
+                    print("[WARNING] Continuing to next model.")
+                except Exception as e:
+                    print(f"[WARNING] Simulation failed for {run_id}: {type(e).__name__}: {e}")
+                    print("[WARNING] Continuing to next model.")
+
+            time.sleep(5)

@@ -1,0 +1,4 @@
+run_id,seed,translation_cost,turning_cost
+two_value_split_cost_test_mac_0000_000,71940,0.00025,0.00025
+two_value_split_cost_test_mac_0000_000,31771,0.00025,0.00025
+two_value_split_cost_test_mac_0000_000,11189,0.00025,0.00025
