@@ -15,7 +15,8 @@ How it works (see also the project memory notes):
         results/<tournament_id>/CompetitiveAgent1/checkpoint.pt   <- model A
         results/<tournament_id>/CompetitiveAgent2/checkpoint.pt   <- model B
         results/<tournament_id>/configuration.yaml                <- both behaviours
-    then run `mlagents-learn ... --resume --inference --deterministic`.
+    then run `mlagents-learn ... --resume --inference` (actions are SAMPLED, not
+    greedy — see the deterministic note on run_matchup/run_tournament).
 
 Reuses launch_inference_sim / run_eval from trainer_and_simulator_functions.py.
 REMEMBER to activate the conda env with mlagents before running.
@@ -181,7 +182,10 @@ def run_matchup(
     base_port: int = 5015,
     timeout_s: int = 5000,
     seed: int | None = 17,
-    deterministic: bool = True,
+    # Actions are SAMPLED from the categorical policy (not greedy argmax) so play
+    # matches how the models behaved during training. Trade-off: matchups are not
+    # bit-reproducible run-to-run — use enough episodes to average over sampling.
+    deterministic: bool = False,
     behaviour_p1: str = BEHAVIOUR_P1,
     behaviour_p2: str = BEHAVIOUR_P2,
 ) -> Path:
@@ -232,7 +236,8 @@ def run_tournament(
     port_step: int = 20,
     timeout_s: int = 5000,
     seed: int | None = 17,
-    deterministic: bool = True,
+    # Sample actions (not greedy) to preserve training-time behaviour; see run_matchup.
+    deterministic: bool = False,
     behaviour_p1: str = BEHAVIOUR_P1,
     behaviour_p2: str = BEHAVIOUR_P2,
 ):

@@ -26,8 +26,12 @@ should be fine for analysis.
 and which is 'Player2'
 - **Trial mix:** experimental **50/25/25** across 45/90/180° wall separations (set in Octagon's
   `GeneralGlobals.cs`); 
-- **Reproducibility:** set deterministic inference so trial variation comes from the stochastic
-  arena, not action sampling.
+- **Action selection:** SAMPLE actions (`deterministic=False`), matching how the models behaved
+  during training (the discrete categorical policy they were optimised under). Greedy (`argmax`)
+  inference is avoided as it can diverge from learned behaviour (e.g. collapsing mixed strategies).
+  Consequence: matchups are not bit-reproducible run-to-run, so run enough episodes per matchup to
+  average over sampling noise. Trial content and per-trial timing are still pinned by the
+  predetermined trial sequence, so those remain controlled across models.
 
 ## Repos
 

@@ -328,8 +328,10 @@ def launch_inference_sim(run_dir: Path,
                 ):
     '''3) Launch unity mlagents-learn in inference mode for simulations.
     deterministic: if True, pass --deterministic so the policy selects greedy
-    actions (dist.argmax). Used by the tournament so trial variation comes only
-    from the stochastic arena, not action sampling.
+    actions (dist.argmax). Defaults to False everywhere (solo/social batch
+    inference AND the tournament) so actions are SAMPLED from the categorical
+    policy, matching how the models behaved during training. Greedy is retained
+    only as an opt-in for cases where run-to-run reproducibility is needed.
     trial_seq: optional path to a predetermined trial-sequence JSON (see
     trial_sequences/generate_trial_sequence.py). When given, the Unity build
     replays that exact string of trials and stops once it is exhausted, so every
