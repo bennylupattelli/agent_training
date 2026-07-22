@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import torch
 from pathlib import Path
@@ -23,7 +25,7 @@ Note: For Linux use the unity_env_path needs to point to the .x86_64 file (the b
 def sample_first_thetas(
         N: int,
         gamma_range=(0.95, 0.9999),
-        sp_range=(1e-4, 1e-3),
+        sp_range=(2.5e-6, 4e-3),
         device="cpu",
 ):
     '''
@@ -49,94 +51,12 @@ def sample_first_thetas(
 
     return theta
 
-def sample_split_cost(
-        #ratio_range,
-        move_range=(0.00025, 0.004),
-        turn_range=(0.00025, 0.004),
-        n = 25,
-        distribution="even_steps",
-        seed=None,
-):
-    '''
-    (not implemented: Ratio range determines the relative size of each parameter with respect to the other.)
-    n is the number of samples for each parameter which will result in a n*n total samples.
-    Move and turn ranges determine the absolute lower and upper ceilings for each parameter.
-    Distribution argument determines how the parameter values are sampled:
-        at even ratio steps,
-        randomly via uniform distribution,
-        randomly via log distribution
-    '''
-
-    rng = np.random.default_rng(seed)
-
-    #r0, r1 = ratio_range
-    m0, m1 = move_range
-    t0, t1 = turn_range
-
-    if m0 <= 0 or m1 <= 0 or t0 <= 0 or t1 <= 0:
-        raise ValueError("Cost ranges must be positive.")
-
-    if m0 >= m1 or t0 >= t1:
-        raise ValueError("Each range must be ordered as (lower, upper).")
-
-    if distribution=="even_steps":
-
-        n_per_dim = int(np.sqrt(n))
-
-        if n_per_dim ** 2 != n:
-            raise ValueError(
-                "For even steps, n must be a perfect square"
-            )
-
-        translation_costs = np.linspace(m0, m1, n_per_dim)
-        turning_costs = np.linspace(t0, t1, n_per_dim)
-        
-        theta = np.array([
-        [tc,rc]
-        for tc in translation_costs
-        for rc in turning_costs
-        ])
-    
-    elif distribution=="uniform":
-
-        translation_costs = rng.uniform(m0, m1, n)
-        turning_costs = rng.uniform(t0, t1, n)
-
-        theta = np.column_stack([
-            translation_costs,
-            turning_costs
-        ])
-    
-    elif distribution=="log_uniform":
-
-        translation_costs = np.exp(
-            rng.uniform(np.log(m0), np.log(m1), n)
-        )
-
-        turning_costs = np.exp(
-            rng.uniform(np.log(t0), np.log(t1), n)
-        )
-
-        theta = np.column_stack([
-            translation_costs,
-            turning_costs
-        ])
-    
-    else:
-        raise ValueError(
-            f"Unknown distribution '{distribution}'. "
-            "Choose from: even_steps, uniform, log_uniform"
-        )
-
-    return theta
 
 
 def patch_agents_yaml(
         template_yaml: str | Path,
         output_yaml: str | Path,
-        split_cost: bool,
-        translation_cost: float,
-        turning_cost: float,
+        run_dir: str | Path,
         gamma: float = 0.99,
         step_penalty: float = 1e-2,
         behaviour_name: str | None = None,
@@ -146,9 +66,7 @@ def patch_agents_yaml(
     '''
     2) Load yaml file for agents and patch gamma.
     template_yaml: path to yaml file,
-    output_yaml: path to write the patched yaml file,
-    translation_cost: penalty for each translational movement step,
-    turning_cost: penalty for each rotational movement step,
+    run_dir: directory to save the patched yaml file,
     gamma: PPO discount,
     step_penalty: penalty for each step taken,
     behaviour_name: name of the behaviour to patch, if None patch all behaviours,
@@ -160,7 +78,7 @@ def patch_agents_yaml(
     
     run_dir = "/Path/to/your/new/agents/folder/in/run/directory", e.g., run_dir = Path("runs") / "run_0001"
     
-    output_yaml = run_dir/name_of_new_yaml_file.yaml, e.g., output_yaml = run_dir / "SoloConfig.yaml"
+    output_yaml = run_dir / "SoloConfig.yaml", e.g., output_yaml = run_dir / "SoloConfig.yaml"
     '''
 
     template_yaml = Path(template_yaml)
@@ -183,16 +101,9 @@ def patch_agents_yaml(
     if missing:
         raise KeyError(f"Behaviours not found in yaml file: {missing}. Found: {list(behaviours.keys())}")
     
-    if not split_cost:
-        if "step_penalty" not in env_parameters:
-            raise KeyError("Missing environment parameter 'step_penalty'")
-    if split_cost:
-        if "translation_cost" not in env_parameters:
-            raise KeyError("Missing environment parameter 'translation_cost'")   
+    if "step_penalty" not in env_parameters:
+        raise KeyError("Missing environment parameter 'step_penalty'")
 
-        if "turning_cost" not in env_parameters:
-            raise KeyError("Missing environment parameter 'turning_cost'")   
-    
     for b in target_behaviours:
         bcfg = behaviours[b]
 
@@ -212,15 +123,9 @@ def patch_agents_yaml(
         extrinsic_cfg["gamma"] = float(gamma)
 
     for p in env_parameters:
-        if not split_cost:
-            if p == "step_penalty":
-                env_parameters[p] = float(step_penalty)
-        if split_cost:
-            if p == "translation_cost":
-                env_parameters[p] = float(translation_cost)
-            if p == "turning_cost":
-                env_parameters[p] = float(turning_cost)          
-      
+        if p == "step_penalty":
+            env_parameters[p] = float(step_penalty)
+            
     with output_yaml.open("w") as f:
         yaml.dump(cfg, f)
 
@@ -236,7 +141,7 @@ def launch_training(
         base_port: int,
         seed: int | None = None,
         extra_args: list[str] | None = None,
-        cwd: Path | None = None,
+        run_dir: Path | None = None,
 ):
     '''
     3) Launch unity mlagents-learn for one training run.
@@ -255,10 +160,6 @@ def launch_training(
 
     # build the command-line invocation
     cmd = [
-        #"xvfb-run",
-        #"-a",
-        #"-s",
-        #"-screen 0 1280x1024x24",
         "mlagents-learn", # executable
         str(patched_yaml), # path to the yaml config
         "--env", str(unity_env_path), # points to the compiled unity environment
@@ -267,12 +168,12 @@ def launch_training(
         "--no-graphics", # headless mode
         "--run-id", run_id, # specify run id
         "--base-port", str(base_port),
-        "--timeout-wait", "300",
-        "--force",
+        
     ]
 
     if seed is not None:
         cmd.extend(["--seed", str(seed)])
+        print(f"Using seed: {seed} for training run {run_id}")
 
     # this allows passing extra arguments, e.g., --num-envs=4
     if extra_args:
@@ -284,7 +185,7 @@ def launch_training(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd=str(cwd) if cwd else None
+        cwd=str(run_dir) if run_dir else None
     ) as p:
         assert p.stdout is not None
         for line in p.stdout:
@@ -412,7 +313,7 @@ def run_eval(cmd, out_path: Path, poll_s=0.2, timeout_s=300, cwd: Path | None = 
 
 
 
-
+# Note that running inference can also take a seed. I'm just going to default set this to 17 for now 
 def launch_inference_sim(run_dir: Path,
                 unity_env_path: Path,
                 patched_yaml_path: Path,
@@ -421,9 +322,18 @@ def launch_inference_sim(run_dir: Path,
                 episodes: int,
                 base_port: int,
                 timeout_s: int = 5000, # more time is needed for more than 100 episodes
-                seed: int | None = None,
+                seed: int | None = 17,
+                deterministic: bool = False,
+                trial_seq: Path | str | None = None,
                 ):
-    '''3) Launch unity mlagents-learn in inference mode for simulations.'''
+    '''3) Launch unity mlagents-learn in inference mode for simulations.
+    deterministic: if True, pass --deterministic so the policy selects greedy
+    actions (dist.argmax). Used by the tournament so trial variation comes only
+    from the stochastic arena, not action sampling.
+    trial_seq: optional path to a predetermined trial-sequence JSON (see
+    trial_sequences/generate_trial_sequence.py). When given, the Unity build
+    replays that exact string of trials and stops once it is exhausted, so every
+    model sees identical trials. When None, the build generates trials randomly.'''
 
     run_dir = Path(run_dir)
     unity_env_path = Path(unity_env_path)
@@ -446,16 +356,26 @@ def launch_inference_sim(run_dir: Path,
     cmd = [
         "mlagents-learn",
         str(patched_yaml_path),
-        "--run-id", train_run_id,          
+        "--run-id", train_run_id,
         "--resume",
         "--inference",
         "--base-port", str(base_port),
+        # --deterministic must precede --env-args (which consumes all remaining args)
+        *(["--deterministic"] if deterministic else []),
         "--env", str(unity_env_path),
         "--no-graphics",                 
         "--env-args",
         "--sim_out", str(out_path.resolve()),
         "--sim_eps", str(episodes),
     ]
+
+    # Predetermined trial sequence (optional). Passed through --env-args so the
+    # Unity build reads it via GetCommandLineArgs(); absence => random trials.
+    if trial_seq is not None:
+        trial_seq = Path(trial_seq).resolve()
+        if not trial_seq.exists():
+            raise FileNotFoundError(f"trial_seq file not found: {trial_seq}")
+        cmd.extend(["--trial_seq", str(trial_seq)])
 
     if seed is not None:
         cmd.extend(["--seed", str(seed)])
@@ -471,7 +391,7 @@ def launch_inference_sim(run_dir: Path,
 def sequential_runs(
         in_yaml: Path,
         run_dir: Path,
-        work_dir: Path,
+        yaml_injection: bool = False,
         gamma: float = 0.99,
         sp: float = 1e-2,
         behaviour_name: str = "OctagonAgentSolo",
@@ -481,45 +401,50 @@ def sequential_runs(
         # for Windows use the unity_build path that points to the .exe file (the build), e.g. unity_build = Path("C:/path/to/env.exe")
         base_run_id: str = "run",
         device: str = "cpu",
-        n_agents: int = 1,
+        n_models: int = 1,
+        run_id_offset: int = 0,
         simulate: bool = False,
         n_envs: int = 1,
-        n_eps: int = 5,
-        seed: int | None = None,
+        n_steps: int = 5,
+        extra_args: list[str] | None = None,
 ):
     '''
     in_yaml = "/Path/to/original.yaml"
     run_dir = "/Path/to/your/new/agents/run/directory", e.g., run_dir = Path("runs") assuming that the current working directory is the sbi directory.
-    work_dir = "/Path/to/your/work/directory/for/simulations", e.g., work_dir = Path("/Users/benny/Documents/swc/bayesian-inference/sbi")
     unity_build = Path("/Path/to/your/unity/build"), e.g. unity_build=Path("/Users/benny/Builds/OctagonAgentSolo.app")
     base_run_id = prefix to every simulation run id
     device = torch device for training (e.g., "cpu" or "cuda:0")
-    n_agents = number of agents (models) to train sequentially
+    n_models = number of agents (models) to train sequentially
     n_envs = number of parallel environments to use for training (e.g., 1, 2, 4, etc.)
     n_eps = number of episodes to run for each simulation in the inference step (e.g., 1000, 10000, 100000, etc.)
     '''
     
     run_dir = Path(run_dir)
     in_yaml = Path(in_yaml)
-    work_dir = Path(work_dir)
+    seeds = [random.randint(0, 1e6) for _ in range(n_models)]
+    print(f"Using seeds: {seeds} for {n_models} sequential runs")
 
-    for i in range(n_agents):
-        
-        run_id = f"{base_run_id}_{i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
-        patched_yaml_path = run_dir / f"Config_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
-        
+    for i in range(n_models):
+        seed = seeds[i]
+        run_id = f"{base_run_id}_{run_id_offset + 1 + i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
+        # patched_yaml_path = run_dir / f"Config_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
+        yaml_filename = in_yaml.name # get the filename from the input yaml path, e.g. "SoloConfig.yaml"
+        patched_yaml_path = run_dir / yaml_filename # create a unique patched yaml file for each run
         train_port = 5005 + 20 * i
         sim_port   = 5015 + 20 * i  
 
-        # this function replaces the placeholders in the yaml file with the sampled parameters
-        patch_agents_yaml(
-            template_yaml=in_yaml,
-            output_yaml=patched_yaml_path,
-            gamma=gamma,
-            step_penalty=sp,
-            behaviour_name=behaviour_name,
-            extrinsic_reward_key="extrinsic",
-        )
+        if yaml_injection:
+            # this function replaces the placeholders in the yaml file with the sampled parameters
+            patch_agents_yaml(
+                template_yaml=in_yaml,
+                output_yaml=patched_yaml_path,
+                gamma=gamma,
+                step_penalty=sp,
+                behaviour_name=behaviour_name,
+                extrinsic_reward_key="extrinsic",
+            )
+        else:
+            patched_yaml_path = in_yaml # if yaml_injection is False, use the original yaml file for all runs without patching
 
         print(f"patched yaml for run {run_id} with gamma={gamma} and step_penalty={sp} to {patched_yaml_path}")
 
@@ -533,21 +458,22 @@ def sequential_runs(
             num_envs=n_envs,
             base_port=train_port,
             seed=seed,
-            cwd=work_dir,
+            run_dir=run_dir,
+            extra_args=extra_args
         )
 
         if simulate == True:
             print(f"launching inference for run {run_id}")
             # this function launches one inference run using the trained model from the training run
-            # specify the number of episodes to run 
+            # specify the number of steps to run 
             # the random seed is not currently implemented in the inference code, but it is included here for future use
             try:
                 launch_inference_sim(
-                    run_dir=work_dir,
+                    run_dir=run_dir,
                     unity_env_path=unity_build,
                     patched_yaml_path=patched_yaml_path.resolve(),
                     train_run_id=run_id,
-                    out_path=work_dir / "simulations" / f"sim_{run_id}",
+                    out_path=run_dir / "simulations" / f"sim_{run_id}",
                     episodes=n_eps,
                     base_port=sim_port,
                     seed=seed,
@@ -563,10 +489,12 @@ def sequential_runs(
         time.sleep(5)
 
 
+
+
 def sbi_simulator(
         n: int,
         in_yaml: Path,
-        #run_dir: Path,
+        run_dir: Path,
         work_dir: Path,
         behaviour_name: str = "OctagonAgentSolo",
         unity_build: Path = Path("/Users/benny/Builds/OctagonAgentSolo.app"),
@@ -577,80 +505,40 @@ def sbi_simulator(
         n_envs: int = 1,
         n_eps: int = 5,
         seed: int | None = None,
-        step_penalty=False,
-        split_penalty=False
 ):
     '''Umbrella function to run the whole pipeline with one command:
     1. Sample N batches of parameters from the prior distribution
     2. For each batch of parameters, patch the template yaml file and launch a training run with the patched yaml and Unity environment build
     3. After each training run, launch an inference run using the trained model from the training run, specifying the number of episodes to run and the random seed for future use (currently not implemented in the inference code)'''
     
-    #run_dir = Path(run_dir)
-    work_dir = Path(work_dir).resolve()
-    in_yaml = Path(in_yaml).resolve()
-    unity_build = Path(unity_build).resolve()
+    run_dir = Path(run_dir)
+    in_yaml = Path(in_yaml)
+    work_dir = Path(work_dir)
 
-    config_dir = work_dir / "configs"
-    #results_dir = work_dir / "results"
-    simulations_dir = work_dir / "simulations"
-    #logs_dir = work_dir / "logs"
+    thetas = sample_first_thetas(n) # output is (n, 2) np array
 
-    for d in [config_dir, simulations_dir]:
-        d.mkdir(parents=True, exist_ok=True)
-
-    if step_penalty and split_penalty:
-        raise ValueError("Choose only one: step_penalty or split_penalty.")
-    
-    if step_penalty:
-        thetas = sample_first_thetas(n) # output is (n, 2) np array
-    elif split_penalty:
-        thetas = sample_split_cost(n=n, seed=seed)
-    else:
-        raise ValueError(
-            f"Desired parameter not given. Step penalty is '{step_penalty}', split penalty is '{split_penalty}'"
-            "Choose from: step_penalty=True or step_penalty=False"
-        )
     #print(f"Sampled thetas:\n{thetas}")
 
     # get N batches of parameter values from the prior distribution
-    for i, theta in enumerate(thetas):
+    for i in range(n):
+        _, sp = map(float, thetas[i]) # convert tensor values to floats for yaml patching
 
         run_id = f"{base_run_id}_{i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
-        
-        patched_yaml_path = config_dir / f"SoloConfig_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
+        patched_yaml_path = run_dir / f"SoloConfig_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
 
         train_port = 5005 + 20 * i
         sim_port   = 5015 + 20 * i
 
-        if step_penalty:
-            _, sp = map(float, theta) # convert tensor values to floats for yaml patching
-
-            # this function replaces the placeholders in the yaml file with the sampled parameters
-            patch_agents_yaml(
-                template_yaml=in_yaml,
-                output_yaml=patched_yaml_path,
-                split_cost=False,
-                gamma=0.99,
-                step_penalty=sp,
-                behaviour_name=behaviour_name,
-                extrinsic_reward_key="extrinsic"
-            )
-
-        elif split_penalty:
-            tc, rc = map(float, theta) 
-        
-            # this function replaces the placeholders in the yaml file with the sampled parameters
-            patch_agents_yaml(
-                template_yaml=in_yaml,
-                output_yaml=patched_yaml_path,
-                split_cost=True,
-                translation_cost=tc,
-                turning_cost=rc,
-                gamma=0.99,
-                behaviour_name=behaviour_name,
-                extrinsic_reward_key="extrinsic"
-            )
-
+        # this function replaces the placeholders in the yaml file with the sampled parameters
+        patch_agents_yaml(
+            template_yaml=in_yaml,
+            output_yaml=patched_yaml_path,
+            gamma=0.99,
+            step_penalty=sp,
+            behaviour_name=behaviour_name,
+            extrinsic_reward_key="extrinsic"
+        )
+    
         # this function launches one training run with the specified yaml file and Unity environment build
         launch_training(
             patched_yaml=patched_yaml_path,
@@ -660,20 +548,20 @@ def sbi_simulator(
             num_envs=n_envs,
             base_port=train_port,
             seed=seed,
-            cwd=work_dir,
+            run_dir=run_dir,
         )
 
-        if simulate:
+        if simulate == True:
             # this function launches one inference run using the trained model from the training run
             # specify the number of episodes to run 
             # the random seed is not currently implemented in the inference code, but it is included here for future use
             try:
                 launch_inference_sim(
-                    run_dir=work_dir,
+                    run_dir=run_dir,
                     unity_env_path=unity_build,
-                    patched_yaml_path=patched_yaml_path,
+                    patched_yaml_path=patched_yaml_path.resolve(),
                     train_run_id=run_id,
-                    out_path=simulations_dir/f"sim_{run_id}",
+                    out_path=work_dir / "simulations" / f"sim_{run_id}",
                     episodes=n_eps,
                     base_port=sim_port,
                     seed=seed,
