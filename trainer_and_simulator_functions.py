@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import torch
 from pathlib import Path
@@ -404,7 +406,6 @@ def sequential_runs(
         simulate: bool = False,
         n_envs: int = 1,
         n_steps: int = 5,
-        seed: int | None = 17,
         extra_args: list[str] | None = None,
 ):
     '''
@@ -420,9 +421,11 @@ def sequential_runs(
     
     run_dir = Path(run_dir)
     in_yaml = Path(in_yaml)
+    seeds = [random.randint(0, 1e6) for _ in range(n_models)]
+    print(f"Using seeds: {seeds} for {n_models} sequential runs")
 
     for i in range(n_models):
-        
+        seed = seeds[i]
         run_id = f"{base_run_id}_{run_id_offset + 1 + i:04d}" # create a unique run ID for each simulation run, e.g. "sbi_solo_run_0001", "sbi_solo_run_0002", etc.
         # patched_yaml_path = run_dir / f"Config_{run_id}.yaml" # create a unique patched yaml file for each run, e.g. "SoloConfig_0001.yaml", "SoloConfig_0002.yaml", etc.
         yaml_filename = in_yaml.name # get the filename from the input yaml path, e.g. "SoloConfig.yaml"
