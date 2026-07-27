@@ -408,6 +408,11 @@ def sequential_runs(
         simulate: bool = False,
         n_envs: int = 1,
         n_steps: int = 5,
+        # Passed through to mlagents-learn, but ONLY for the first model in the
+        # batch (i == 0). Flags like --resume/--initialize-from are meant for the
+        # run being continued, not for the fresh runs that follow it; applying
+        # them to every model would make each subsequent run try to resume its
+        # own (non-existent) prior checkpoint.
         extra_args: list[str] | None = None,
 ):
     '''
@@ -451,6 +456,11 @@ def sequential_runs(
         print(f"patched yaml for run {run_id} with gamma={gamma} and step_penalty={sp} to {patched_yaml_path}")
 
         print(f"launching training for run {run_id} with config {patched_yaml_path}")
+        if extra_args:
+            if i == 0:
+                print(f"  applying extra_args to first model only: {extra_args}")
+            else:
+                print(f"  skipping extra_args for {run_id} (only the first model gets them)")
         # this function launches one training run with the specified yaml file and Unity environment build
         launch_training(
             patched_yaml=patched_yaml_path,
@@ -461,7 +471,9 @@ def sequential_runs(
             base_port=train_port,
             seed=seed,
             run_dir=run_dir,
-            extra_args=extra_args
+            # Only the first model in the batch receives the extra args (e.g. --resume);
+            # every later run is a fresh model and must start clean.
+            extra_args=(extra_args if i == 0 else None),
         )
 
         if simulate == True:

@@ -186,6 +186,12 @@ def run_matchup(
     # matches how the models behaved during training. Trade-off: matchups are not
     # bit-reproducible run-to-run — use enough episodes to average over sampling.
     deterministic: bool = False,
+    # Predetermined trial-sequence JSON (trial_sequences/generate_trial_sequence.py).
+    # When given, every matchup replays the SAME string of trials and per-trial
+    # timing, so trial content is pinned across models (requires a build compiled
+    # with ScriptedTrialSequence.cs + timing keys). None => build draws trials
+    # randomly from the GeneralGlobals probabilities.
+    trial_seq: Path | str | None = None,
     behaviour_p1: str = BEHAVIOUR_P1,
     behaviour_p2: str = BEHAVIOUR_P2,
 ) -> Path:
@@ -221,6 +227,7 @@ def run_matchup(
         timeout_s=timeout_s,
         seed=seed,
         deterministic=deterministic,
+        trial_seq=trial_seq,
     )
 
 
@@ -232,22 +239,32 @@ def run_tournament(
     episodes: int,
     run_ids: list[str] | None = None,
     include_self_matchups: bool = True,
+    # Also run each distinct pair in BOTH seat orders (A as P1 vs B, and B as P1 vs A).
+    # Off by default since P1/P2 is symmetric; enable to double the data per pair and to
+    # empirically confirm the seat has no effect by comparing a pair against its mirror.
+    # Self-matchups are never duplicated.
+    include_mirrors: bool = False,
     base_port: int = 5015,
     port_step: int = 20,
     timeout_s: int = 5000,
     seed: int | None = 17,
     # Sample actions (not greedy) to preserve training-time behaviour; see run_matchup.
     deterministic: bool = False,
+    # Predetermined trial-sequence JSON replayed identically for every matchup so
+    # trial content/timing is pinned across models; None => random trials. Keep the
+    # sequence LONGER than `episodes` — the build caps the run at sequence length.
+    trial_seq: Path | str | None = None,
     behaviour_p1: str = BEHAVIOUR_P1,
     behaviour_p2: str = BEHAVIOUR_P2,
 ):
     """
     Round-robin tournament over the models under models_root/<run_id>.
 
-    Matchups are itertools.combinations_with_replacement: every unordered pair,
-    INCLUDING self-matchups (toggle with include_self_matchups), and NO mirrors
-    (P1/P2 are symmetric, per the tournament brief). One JSON per matchup lands
-    under out_root/<A>__vs__<B>/.
+    Matchups: every unordered pair, INCLUDING self-matchups (toggle with
+    include_self_matchups). By default NO mirrors — P1/P2 are symmetric, so each pair
+    runs once. Set include_mirrors=True to also run each distinct pair in the swapped
+    seat order (both A__vs__B and B__vs__A); this doubles the data per pair and lets you
+    check the seat has no effect. One JSON per matchup lands under out_root/<A>__vs__<B>/.
     """
     models_root = Path(models_root)
     out_root = Path(out_root)
@@ -260,8 +277,15 @@ def run_tournament(
     if len(run_ids) < 1:
         raise FileNotFoundError(f"No model run dirs with checkpoints under {models_root}")
 
-    pair_iter = itertools.combinations_with_replacement(run_ids, 2)
-    matchups = [(a, b) for a, b in pair_iter if include_self_matchups or a != b]
+    matchups: list[tuple[str, str]] = []
+    for a, b in itertools.combinations_with_replacement(run_ids, 2):
+        if a == b:
+            if include_self_matchups:
+                matchups.append((a, b))
+        else:
+            matchups.append((a, b))
+            if include_mirrors:
+                matchups.append((b, a))   # seat-swapped mirror, kept adjacent to its pair
 
     # One shared CLI config (architecture is identical across entrants).
     config_yaml = write_tournament_config_yaml(
@@ -291,6 +315,7 @@ def run_tournament(
                 timeout_s=timeout_s,
                 seed=seed,
                 deterministic=deterministic,
+                trial_seq=trial_seq,
                 behaviour_p1=behaviour_p1,
                 behaviour_p2=behaviour_p2,
             )
