@@ -1,0 +1,59 @@
+##  See Training-Configuration-File doc page for information on each parameter.
+# stability can be increased by decreasing learning rate and increasing buffer size.
+# RND is used here for curiosity instead of the Curiosity module, as it is less likely 
+# to be affected by random environment noise
+
+behaviors:
+  OctagonAgentSolo:
+    trainer_type: ppo
+    max_steps: 3e06                   # Total training steps
+    time_horizon: 128                 # How many steps of experience per agent before updating (could be increased)
+    summary_freq: 20000               # How often stats are written to TensorBoard
+    keep_checkpoints: 30               # Checkpoints that are older than the last keep_checkpoints will be deleted.
+    checkpoint_interval: 100000       # Increased this from 50000
+
+    hyperparameters:
+      batch_size: 512                 # Number of experiences used per training batch (could decreased, recommended range is 32-512)
+      buffer_size: 10240               # How many total experiences are collected before training (could be increased, recommended range is 2048-409600)
+      learning_rate: 3.0e-4           # Changed from 3.0e-4, but should be experimented with
+      learning_rate_schedule: linear  # doubt this needs to be changed (for PPO)
+      beta: 5.0e-3                    # Decision-making randomness. Decays linearly with time. May not be important if using Curiosity
+      epsilon: 0.2                    # How different the old and new policies can be during gradient descent updating. Default value.
+      lambd: 0.95                     # GAE regularisation parameter. Higher means stronger affect of current environment rewards,
+                                      # and so is higher variance. Default value.
+      num_epoch: 3                    # Number of passes through the buffer per update. Larger batch size, higher acceptable num_epoch.
+                                      # Increasing will reduce update stability but increase learning speed.
+
+    network_settings:
+      normalize: false                    # Helpful mainly with complex continuos control problems (but not to discrete).   
+      hidden_units: 512                   # Size of each hidden layer
+      num_layers: 2                       # How deep the network is
+      vector_observation_space_size: 42   # Number of floats recorded as observations each step
+      memory:                     # LSTM
+        sequence_length: 64      # Length of the sequence of experiences while training. Smaller values increase training 
+                                  # but reduce the distance into the past that the agent can remember.
+                                  # Reduced to 64 from 128 on 260219
+        memory_size: 256         # size of the float array used to store the hidden state of the RNN. Scales without amount
+                                  # of information expected to be remembered in order to complete the task successfully.
+                                  # This is very high, above the default of 128 and range of 32-256. Could consider reducing.
+                                  # Reduced to 256 from 512 on 260219
+
+    reward_signals:
+      extrinsic:                      # Reward signals from the environment itself (i.e. not Curiosity, GAIL)
+        gamma: 0.99                   # Discount factor for future rewards. Keep close to 1 so that agent values 
+                                      # episode-terminal rewards. Default value
+        strength: 1.0                 # Scalar multiple for all rewards of this time. Default value.
+
+      rnd:                            # Random Network Distillation for intrinsic motivation / curiosity
+        gamma: 0.99
+        strength: 0.01                # Scalar multiple. Typically between 0.001 and 0.01.
+                                      # Increase to increase curiosity:extrinsic reward ratio 
+        learning_rate: 1.0e-04        # Learning rate to update RND module
+
+    # init_path: results/SocialSelfPlay12/OctagonAgentSocial/OctagonAgentSocial12.pt # Can be used to load and continue training
+                                                                                     # from a pre-trained model
+    self_play: null
+
+environment_parameters:
+  translation_cost:
+  turning_cost:

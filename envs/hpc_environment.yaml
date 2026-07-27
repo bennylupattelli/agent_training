@@ -1,0 +1,16 @@
+name: mlagents
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10.12
+  - pip
+  - pip:
+      - mlagents==1.1.0
+      - mlagents-envs==1.1.0
+      - numpy==1.23.5
+      - protobuf==3.20.3
+      - pyyaml==6.0.2
+      - h5py
+      - tensorboard
+      - torch==2.2.2

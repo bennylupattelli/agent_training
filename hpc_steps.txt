@@ -1,0 +1,52 @@
+1. connect
+
+ssh USER@ssh.swc.ucl.ac.uk
+ssh USER@hpc-gw2
+
+
+2. navigate to builds directory (make directories with mkdir)
+
+cd /ceph/scratch/USER
+cd /ceph/scratch/USER/octagon/builds
+
+
+3. upload the unity build (open a new terminal outside of the ssh session)
+
+rsync -av --progress \
+PATH/TO/BUILD/ON/LOCAL/MACHINE \
+USER@swc-gateway:/ceph/scratch/USER/octagon/builds/BUILD_FOLDER/
+
+
+4. ssh back into hpc and make the executable runnable
+
+mv ~/BUILD.x86_64 .
+chmod +x BUILD.x86_64
+
+
+5. copy the repo with simulator script and output folders (other terminal)
+
+rsync -av --progress \
+    PATH/TO/REPO/ON/LOCAL/MACHINE \
+    USER@swc-gateway:/ceph/scratch/bgenca/octagon/agent_training/
+
+
+6. upload ML agents configuration file (other terminal)
+
+rsync -av --progress \
+    /Users/USER/Repos/octagon/Assets/Scripts/MLConfigFiles/CONFIG.yaml \                                                                  
+    bgencarelli@swc-gateway:/ceph/scratch/USER/octagon/template_yaml/CONFIG.yaml
+
+
+7. create/use a linux-compatible environment setup yaml
+
+module load miniconda/23.10.0
+conda env create \
+    --prefix /ceph/scratch/USER/conda_envs/mlagents \
+    -f environment_hpc.yaml
+
+
+8. run and monitor the job
+
+sbatch run_training.slurm
+squeue -u USER
+tail -f logs/NAME_JOBID.out
