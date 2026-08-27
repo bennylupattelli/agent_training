@@ -89,6 +89,32 @@ def _behaviour_block(config_path: Path, behaviour_name: str) -> dict:
     return block
 
 
+def _environment_parameters(config_path: Path) -> dict:
+    """Return a deep copy of a run's environment_parameters block (e.g. step_penalty).
+
+    These MUST be carried into the tournament config. At inference the mlagents
+    communicator is on, so the build's isTraining is true and OnActionReceived reads
+    step_penalty via Academy.EnvironmentParameters; if it is missing the build throws
+    every action, which freezes the opponent agent. Copying the block over stops that.
+
+    Raises if the block is absent rather than returning None: writing
+    `environment_parameters:` (null) reproduces exactly the silent failure this
+    guards against — the whole 260715 batch ran to completion, full-length JSONs
+    and all, with the opponent frozen at its spawn and P1 winning 350/350.
+    """
+    config_path = Path(config_path)
+    with config_path.open("r") as f:
+        cfg = yaml.load(f)
+    env = cfg.get("environment_parameters")
+    if env is None:
+        raise KeyError(
+            f"No 'environment_parameters' in {config_path}. The build reads step_penalty "
+            "from it on every action at inference (isTraining = IsCommunicatorOn) and throws "
+            "without it, which freezes the opponent agent and invalidates the matchup."
+        )
+    return deepcopy(env)
+
+
 def assemble_matchup_run_dir(
     model_a_run_dir: Path,
     model_b_run_dir: Path,
@@ -133,6 +159,8 @@ def assemble_matchup_run_dir(
             behaviour_p1: deepcopy(template),
             behaviour_p2: deepcopy(template),
         },
+        # carry step_penalty etc. so the build does not throw on every action at inference
+        "environment_parameters": _environment_parameters(model_a_run_dir / "configuration.yaml"),
     }
     with (run_dir / "configuration.yaml").open("w") as f:
         yaml.dump(cfg, f)
@@ -164,6 +192,8 @@ def write_tournament_config_yaml(
             behaviour_p1: deepcopy(template),
             behaviour_p2: deepcopy(template),
         },
+        # carry step_penalty etc. so the build does not throw on every action at inference
+        "environment_parameters": _environment_parameters(template_run_dir / "configuration.yaml"),
     }
     with out_yaml.open("w") as f:
         yaml.dump(cfg, f)
