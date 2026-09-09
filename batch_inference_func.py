@@ -1,5 +1,6 @@
 from pathlib import Path
 from trainer_and_simulator_functions import launch_inference_sim
+import os
 
 def batch_inference(
         run_dir: Path,
@@ -41,6 +42,10 @@ def batch_inference(
     for i, run_id in enumerate(run_ids):
         print(f"\n=== [{i+1}/{len(run_ids)}] Running inference: {run_id} ===")
         full_run_id = f"{results_subdir}/{run_id}" if results_subdir else run_id
+        # Check for a part-complete simulation run
+        if (Path(out_root) / full_run_id / 'DONE.txt').exists():
+            print(f"\n=== Skipping {run_id}. Folder already present.")
+            continue
         # Mirror the trained-model tree under out_root, i.e.
         # out_root/<results_subdir>/<run_id>  ->  out_root/2606/260624/260624_0001
         out_path = Path(out_root) / full_run_id
