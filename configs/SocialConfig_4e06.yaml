@@ -1,0 +1,53 @@
+behaviors:
+  OctagonAgentSocial:
+    trainer_type: ppo
+    max_steps: 4000000.0     # Total training steps (reduced to 3e06 260720)
+    time_horizon: 128            # How many steps of experience per agent before updating
+    summary_freq: 20000          # How often stats are written to TensorBoard
+    keep_checkpoints: 40         # Keep more checkpoints since we're saving less frequently. Divisor of max_steps
+    checkpoint_interval: 100000  # Save .onnx checkpoint every 100k steps
+
+    hyperparameters:
+      batch_size: 512           # Number of experiences used per training batch
+      buffer_size: 20480
+      learning_rate: 1.5e-4
+      beta: 5.0e-3
+      beta_schedule: linear
+      epsilon: 0.2
+      lambd: 0.95
+      num_epoch: 3
+
+    network_settings:
+      normalize: false
+      hidden_units: 512         # Size of each hidden layer
+      num_layers: 2              # How deep the network is
+      #vis_encode_type: resnet    # Visual encoder type: simple, nature_cnn, resnet
+      memory:
+        sequence_length: 64      # Length of the sequence of experiences while training. Smaller values increase training 
+                                  # but reduce the distance into the past that the agent can remember.
+                                  # Reduced to 64 from 128 on 260219
+        memory_size: 256         # size of the float array used to store the hidden state of the RNN. Scales without amount
+                                  # of information expected to be remembered in order to complete the task successfully.
+                                  # This is very high, above the default of 128 and range of 32-256. Could consider reducing.
+                                  # Reduced to 256 from 512 on 260219
+
+    reward_signals:
+      extrinsic:
+        gamma: 0.99
+        strength: 1.0
+
+      rnd:
+        gamma: 0.99
+        strength: 0.01 # if exploration is too low up to 0.1
+        learning_rate: 0.0001
+
+    # init_path: results/2602/260221/260221_02/OctagonAgentSolo/OctagonAgentSolo-3000005.pt
+    self_play:
+      window: 8                          # Increased from 5 - more opponent diversity to compensate for slower swaps
+      play_against_latest_model_ratio: 0.5  # Keep 50/50 mix - play against current and historical opponents
+      save_steps: 150000                 # TRIPLED from 50k - allows policy to stabilize between opponent updates
+      swap_steps: 150000                 # TRIPLED from 50k - reduces non-stationarity shock, prevents jittery movement
+      # team_change removed - octagon arena is symmetrical, no positional advantage 
+
+environment_parameters:
+  step_penalty: 0.001

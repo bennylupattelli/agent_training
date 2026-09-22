@@ -589,3 +589,204 @@ def sbi_simulator(
                 print("[WARNING] Continuing to next model.")
 
         time.sleep(5)
+
+
+def write_extended_config(
+        template_yaml: Path,
+        out_yaml: Path,
+        max_steps: float,
+        behaviour_name: str | None = None,
+) -> Path:
+    '''
+    Write a copy of a training config with max_steps raised, for extending finished runs.
+
+    Takes the config the runs were trained with, the path to write, and the new max_steps.
+    Only max_steps changes, so the extension continues the same training.
+
+    This writes a separate file instead of editing the template, because the template is
+    shared with future fresh batches and raising its max_steps would change what a standard
+    run means for every batch after this one.
+    '''
+
+    template_yaml, out_yaml = Path(template_yaml), Path(out_yaml)
+    with template_yaml.open("r") as f:
+        cfg = yaml.load(f)
+
+    behaviours = cfg.get("behaviors")
+    if not behaviours:
+        raise KeyError(f"No 'behaviors' block in {template_yaml}")
+    targets = [behaviour_name] if behaviour_name else list(behaviours)
+    missing = [b for b in targets if b not in behaviours]
+    if missing:
+        raise KeyError(f"Behaviours not in {template_yaml}: {missing}. Found: {list(behaviours)}")
+
+    for b in targets:
+        old = behaviours[b].get("max_steps")
+        if old is not None and float(old) >= float(max_steps):
+            raise ValueError(
+                f"max_steps for '{b}' is already {float(old):.0f}, not below the requested "
+                f"{float(max_steps):.0f}. mlagents would exit on --resume with nothing left "
+                "to train."
+            )
+        behaviours[b]["max_steps"] = float(max_steps)
+
+    out_yaml.parent.mkdir(parents=True, exist_ok=True)
+    with out_yaml.open("w") as f:
+        yaml.dump(cfg, f)
+    return out_yaml
+
+
+def checkpoint_step(model_run_dir: Path, behaviour_name: str) -> int:
+    '''
+    Return the global step a finished run reached. Takes the run dir and behaviour name.
+    Used to confirm a run sits at the old ceiling before extending it, and to report how
+    far each run got.
+    '''
+
+    import torch
+    ckpt = Path(model_run_dir) / behaviour_name / "checkpoint.pt"
+    state = torch.load(ckpt, map_location="cpu", weights_only=False)
+    return int(state["global_step"]["_GlobalSteps__global_step"].item())
+
+
+def runs_below_max_steps(results_root, max_steps, behaviour_name="OctagonAgentSocial",
+                         exclude=(), verbose=True):
+    """
+    Return the run ids under results_root whose checkpoint is below max_steps.
+
+    Takes the folder of runs and the target step count. Use it to pick what still needs
+    extending: resume_training_runs raises on a run already at the ceiling, so a batch that
+    mixes finished and unfinished runs has to be filtered first. Runs with no checkpoint are
+    reported and left out.
+    """
+    results_root = Path(results_root)
+    exclude = set(exclude)
+    todo, done, broken = [], [], []
+    for d in sorted(p for p in results_root.iterdir() if p.is_dir()):
+        if d.name in exclude:
+            continue
+        if not (d / behaviour_name / "checkpoint.pt").exists():
+            broken.append(d.name)
+            continue
+        step = checkpoint_step(d, behaviour_name)
+        (todo if step < max_steps else done).append((d.name, step))
+
+    if verbose:
+        print(f"{len(todo)} runs below {max_steps:.0f} steps, {len(done)} already at or past it")
+        if broken:
+            print(f"  no {behaviour_name}/checkpoint.pt: {broken}")
+        if todo:
+            gains = [max_steps - s for _, s in todo]
+            print(f"  steps to add: {min(gains):,.0f} to {max(gains):,.0f} each, "
+                  f"{sum(gains):,.0f} total")
+    return [name for name, _ in todo]
+
+
+def resume_training_runs(
+        run_ids: list[str],
+        results_root: Path,
+        run_dir: Path,
+        in_yaml: Path,
+        unity_build: Path,
+        max_steps: float,
+        behaviour_name: str = "OctagonAgentSocial",
+        device: str = "cuda:0",
+        n_envs: int = 16,
+        base_port: int = 5005,
+        port_step: int = 20,
+        seed: int | None = 17,
+        extended_yaml: Path | None = None,
+        dry_run: bool = False,
+):
+    '''
+    Extend a set of ALREADY-TRAINED runs to a higher max_steps, one after another.
+
+    Takes the run ids to extend, the folder holding them, the mlagents working dir (the
+    parent of `results/`), the config they were trained with, the build, and the new
+    max_steps. Returns {run_id: reached_step}.
+
+    Use this rather than sequential_runs. That function trains a contiguous block of fresh
+    models, so it passes extra_args (--resume) to the first model only and every later run
+    starts clean. Here every run already exists and needs resuming, and the ids are a
+    hand-picked set rather than a range.
+
+    Two things have to line up, or mlagents does nothing and reports success:
+      - max_steps in the config must exceed the step the runs stopped at, or the resumed run
+        exits with nothing left to train.
+      - the run id must locate the run under <run_dir>/results/. mlagents resolves output as
+        os.path.join(results_dir, run_id), so a run filed into a subfolder needs that
+        subfolder in its id, such as "2607/260723/260723_0034".
+    Both are checked before anything launches, so a mistake costs a message rather than a
+    night of no-op runs.
+    '''
+
+    results_root, run_dir = Path(results_root), Path(run_dir)
+    in_yaml, unity_build = Path(in_yaml), Path(unity_build)
+
+    if not unity_build.exists():
+        raise FileNotFoundError(f"Unity build not found: {unity_build}")
+
+    # mlagents writes to <run_dir>/results/<run_id>, so the id carries any subfolders the
+    # runs were filed into. Derive that prefix rather than trusting the bare name.
+    try:
+        prefix = results_root.relative_to(run_dir / "results")
+    except ValueError as e:
+        raise ValueError(
+            f"results_root ({results_root}) must sit under run_dir/results "
+            f"({run_dir / 'results'}). mlagents resolves output as results_dir/run_id."
+        ) from e
+
+    # every run must exist and still be below the new ceiling
+    starts = {}
+    for rid in run_ids:
+        d = results_root / rid
+        if not (d / behaviour_name / "checkpoint.pt").exists():
+            raise FileNotFoundError(f"No {behaviour_name}/checkpoint.pt under {d}")
+        starts[rid] = checkpoint_step(d, behaviour_name)
+        if starts[rid] >= max_steps:
+            raise ValueError(
+                f"{rid} is already at {starts[rid]} steps, at or past max_steps "
+                f"{max_steps:.0f}. It would resume and exit with nothing to train."
+            )
+
+    extended_yaml = Path(extended_yaml) if extended_yaml else \
+        in_yaml.with_name(f"{in_yaml.stem}_{max_steps:.0e}.yaml".replace("+0", "e").replace("ee", "e"))
+    write_extended_config(in_yaml, extended_yaml, max_steps, behaviour_name)
+    print(f"extended config written: {extended_yaml}  (max_steps -> {max_steps:.0f})")
+
+    print(f"\nResuming {len(run_ids)} runs under {results_root}")
+    for rid in run_ids:
+        print(f"  {rid}: {starts[rid]:>9,} -> {max_steps:>11,.0f}  "
+              f"(+{max_steps - starts[rid]:,.0f} steps)  run-id '{prefix / rid}'")
+    if dry_run:
+        print("\ndry_run=True, nothing launched.")
+        return starts
+
+    reached = {}
+    for i, rid in enumerate(run_ids):
+        mlagents_run_id = str(prefix / rid)
+        print(f"\n=== [{i+1}/{len(run_ids)}] Resuming {rid} "
+              f"(from {starts[rid]:,} steps) as run-id '{mlagents_run_id}' ===")
+        try:
+            launch_training(
+                patched_yaml=extended_yaml,
+                unity_env_path=unity_build,
+                run_id=mlagents_run_id,
+                torch_device=device,
+                num_envs=n_envs,
+                base_port=base_port + port_step * i,
+                seed=seed,
+                run_dir=run_dir,
+                extra_args=["--resume"],      # every run is resumed, unlike sequential_runs
+            )
+            reached[rid] = checkpoint_step(results_root / rid, behaviour_name)
+            print(f"=== Finished {rid}: {starts[rid]:,} -> {reached[rid]:,} steps ===")
+        except Exception as e:
+            reached[rid] = None
+            print(f"=== Failed {rid}. {type(e).__name__}: {e} ===")
+
+    print("\nSummary:")
+    for rid in run_ids:
+        got = reached.get(rid)
+        print(f"  {rid}: {starts[rid]:,} -> {f'{got:,}' if got else 'FAILED'}")
+    return reached

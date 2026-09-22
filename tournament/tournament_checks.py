@@ -1,21 +1,18 @@
 """
 Pre-flight, health and rerun helpers for the cross-model tournament.
 
-Everything here answers one question: **is a matchup real?** A tournament matchup can
-exit cleanly, write a complete full-length JSON, and still be void. That is not
-hypothetical — before the 260729 fix a missing `environment_parameters` block made the
-build throw on every action, which froze CompetitiveAgent2 at its spawn and handed P1
-every trial in all 64 matchups, twice, with nothing in the exit status to show it.
+A matchup can exit cleanly, write a full-length JSON, and still be void. Before the
+260729 fix, a missing environment_parameters block froze one agent and gave the other
+every trial, and the exit status looked fine. So the checks here read behaviour rather
+than exit codes:
 
-So the checks look at behaviour, not at exit codes:
-  - both agents must occupy more than one position (an agent that never moves is frozen),
-  - both agents must trigger some walls (one player winning everything is the same bug),
-  - the trial count must be close to the requested episode count (a short run stalled).
+  - both agents occupy more than one position (an agent that never moves is frozen),
+  - both agents trigger some walls (one player winning everything is the same fault),
+  - the trial count is close to the requested episode count (a short run stalled).
 
-The per-batch config, narrative and results stay in the notebooks
-(`tournament/run_tournament*.ipynb`); everything that computes or asserts lives here.
-Checks read the raw session JSON by regex rather than going through octagon_analysis,
-so this module stays importable in the mlagents env with no analysis dependencies.
+Per-batch config and results stay in the notebooks (tournament/run_tournament*.ipynb).
+Checks read the session JSON by regex instead of going through octagon_analysis, so this
+module imports cleanly in the mlagents env.
 """
 
 from __future__ import annotations
@@ -30,10 +27,49 @@ from pathlib import Path
 
 from tournament.tournament_func import run_matchup, write_tournament_config_yaml
 
-# A run is called SHORT when it logs more than this many trials fewer than requested.
-# Sampled actions mean a run occasionally finishes a trial or two under; a real stall
-# (the 260715_0002 self-matchup logged 68 of ~350) is nowhere near this tolerance.
+# How many trials short of the request before a run counts as short. Sampled actions cost
+# a trial or two; a real stall (68 of ~350, in the 260715_0002 self-matchup) is far below.
 TRIAL_SHORTFALL_TOLERANCE = 5
+
+# Ports one inference matchup needs from its base port.
+MATCHUP_PORT_SPAN = 4
+
+# Base port for one-off matchups such as the smoke test. Not run_matchup's own default of
+# 5015: training takes 5005 + 20*i with 16 envs each, so 5015 falls inside its first block.
+# The round-robin uses 9100+ and reruns 10500+, so 11000 is clear of all three.
+SMOKE_TEST_BASE_PORT = 11000
+
+
+def ports_in_use(base_port, n_ports):
+    """Return the bound TCP ports in [base_port, base_port + n_ports)."""
+    import socket
+    busy = []
+    for port in range(int(base_port), int(base_port) + int(n_ports)):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(("localhost", port))
+            except OSError:
+                busy.append(port)
+    return busy
+
+
+def assert_ports_free(base_port, n_ports, what="this run"):
+    """
+    Raise if a port the run needs is already bound. Takes the range and a label.
+
+    mlagents checks this itself, but only after loading the build and policies, and it
+    reports a UnityWorkerInUseException about "worker number 0" without naming the port.
+    Concurrent training is the usual cause: it takes 5005 + 20*i with 16 envs per model.
+    """
+    busy = ports_in_use(base_port, n_ports)
+    if busy:
+        raise RuntimeError(
+            f"{what} wants ports {base_port}..{base_port + n_ports - 1}, but "
+            f"{len(busy)} are already bound: {busy[:8]}{'...' if len(busy) > 8 else ''}. "
+            "Concurrent training takes 5005 + 20*i (16 envs each); pick a base_port clear of "
+            "it, or stop the other job."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -41,16 +77,14 @@ TRIAL_SHORTFALL_TOLERANCE = 5
 # ---------------------------------------------------------------------------
 
 def preflight(models_root, unity_env_path, trial_seq, run_ids=None,
-              include_mirrors=True, include_self_matchups=True, verbose=True):
+              include_mirrors=True, include_self_matchups=True,
+              base_port=9100, port_step=20, verbose=True):
     """
-    Check a batch can run at all, and report the matchup count. Raises on anything wrong.
+    Check a batch can run, and return the number of matchups. Raises on anything wrong.
 
-    Takes the batch config; returns the number of matchups the round-robin will run.
-
-    The important check is the last one: generate a throwaway tournament config and
-    confirm `environment_parameters` / `step_penalty` is REALLY in it. This has to run
-    from the notebook's own call into a freshly reloaded module, because a stale kernel
-    holding pre-fix code would not carry an assertion inside tournament_func.py either.
+    Takes the batch config. The config probe runs from the caller rather than inside
+    tournament_func, so it also catches a kernel holding pre-fix code, which an assertion
+    inside that module could not.
     """
     models_root, unity_env_path, trial_seq = Path(models_root), Path(unity_env_path), Path(trial_seq)
     if not unity_env_path.exists():
@@ -67,20 +101,26 @@ def preflight(models_root, unity_env_path, trial_seq, run_ids=None,
         if not list((models_root / rid).glob("*/checkpoint.pt")):
             raise FileNotFoundError(f"No <behaviour>/checkpoint.pt under {models_root / rid}")
 
-    # Stale-kernel guard: without environment_parameters the build throws on every
-    # action, CompetitiveAgent2 never gets stepped, and every matchup is a walkover
-    # that still writes a complete, healthy-looking JSON.
+    # Without environment_parameters the build throws on every action, one agent never gets
+    # stepped, and the matchup is a walkover that still writes a healthy-looking JSON.
     with tempfile.TemporaryDirectory() as tmp:
         probe = write_tournament_config_yaml(models_root / run_ids[0], Path(tmp) / "probe.yaml")
         txt = probe.read_text()
     if "environment_parameters" not in txt or "step_penalty" not in txt:
         raise RuntimeError(
-            "Generated config has NO environment_parameters/step_penalty — the build will "
-            "throw every action and freeze P2. Your kernel is running pre-fix code: restart "
+            "Generated config has no environment_parameters/step_penalty. The build would "
+            "throw every action and freeze P2. The kernel is running pre-fix code: restart "
             "it and re-run from the top."
         )
 
     n_matchups = len(expected_matchups(run_ids, include_mirrors, include_self_matchups))
+
+    # The round-robin walks base_port + port_step*i, so a collision at matchup 40 would kill
+    # the batch 20 hours in. Check the whole span now.
+    if base_port is not None:
+        assert_ports_free(base_port, port_step * (n_matchups - 1) + MATCHUP_PORT_SPAN,
+                          what=f"the {n_matchups}-matchup round-robin")
+
     if verbose:
         print(f"All paths OK, config carries step_penalty. {len(run_ids)} entrants "
               f"=> {n_matchups} matchups ({'with' if include_mirrors else 'no'} mirrors, "
@@ -117,15 +157,15 @@ def matchup_health(matchup_dir, expected_trials=None, octagon_dir=None, tourname
     """
     Return a health dict for one finished matchup, without loading the analysis stack.
 
-    Takes the matchup output dir; optionally the requested episode count (to flag SHORT
-    runs) and the Octagon dir + tournament id (to count step_penalty exceptions in the
-    Unity player log). Keys: n_trials, uniq_positions, triggers, n_exceptions, flags, ok.
+    Takes the matchup output dir, optionally the requested episode count (to flag short
+    runs) and the Octagon dir plus tournament id (to count step_penalty exceptions in the
+    Unity log). Keys: n_trials, uniq_positions, triggers, n_exceptions, flags, ok.
     """
     matchup_dir = Path(matchup_dir)
     log = newest_session_json(matchup_dir)
     if log is None:
         return dict(json=None, n_trials=0, uniq_positions={0: 0, 1: 0}, triggers={0: 0, 1: 0},
-                    n_exceptions=None, flags=["NO JSON WRITTEN"], ok=False)
+                    n_exceptions=None, flags=["no JSON written"], ok=False)
 
     raw = log.read_text()
     n_trials = raw.count('"trial start"')
@@ -143,9 +183,9 @@ def matchup_health(matchup_dir, expected_trials=None, octagon_dir=None, tourname
 
     flags = []
     if expected_trials is not None and n_trials < expected_trials - TRIAL_SHORTFALL_TOLERANCE:
-        flags.append(f"SHORT (expected ~{expected_trials - 1}, got {n_trials})")
+        flags.append(f"short (expected ~{expected_trials - 1}, got {n_trials})")
     if min(uniq.values()) <= 1:
-        flags.append("AGENT FROZEN — matchup is void")
+        flags.append("agent frozen, matchup is void")
     if min(triggers.values()) == 0:
         flags.append("one player won every trial")
     if n_exceptions:
@@ -158,7 +198,7 @@ def matchup_health(matchup_dir, expected_trials=None, octagon_dir=None, tourname
 def format_health(tournament_id, health):
     """One-line summary of a matchup_health dict, for printing."""
     if health["json"] is None:
-        return f"{tournament_id}: NO JSON WRITTEN"
+        return f"{tournament_id}: no JSON written"
     u, t = health["uniq_positions"], health["triggers"]
     tail = "  OK" if health["ok"] else "  <-- " + "; ".join(health["flags"])
     return (f"{tournament_id}: {health['n_trials']} trials | unique positions "
@@ -169,10 +209,10 @@ def check_batch(out_root, tournament_ids, expected_trials=None, octagon_dir=None
                 logs=None, verbose=True):
     """
     Validate a whole batch. Takes the batch output dir and the matchup ids to check
-    (usually `logs.keys()`); returns the list of suspect ids.
+    (usually logs.keys()); returns the list of suspect ids.
 
-    Passing `logs` (the dict run_tournament returned) also reports which matchups raised.
-    Only suspect matchups are printed — a clean batch prints just the two summary lines.
+    Passing logs (the dict run_tournament returned) also reports which matchups raised.
+    Only suspect matchups are printed, so a clean batch prints two summary lines.
     """
     out_root = Path(out_root)
     tournament_ids = list(tournament_ids)
@@ -182,11 +222,11 @@ def check_batch(out_root, tournament_ids, expected_trials=None, octagon_dir=None
         if verbose:
             print(f"{len(logs) - len(failed)}/{len(logs)} matchups ran without error")
             for k in failed:
-                print("  RAISED:", k)
+                print("  raised:", k)
 
     suspect = []
     if verbose:
-        print("\nValidity check (both agents must move, both must win some trials):")
+        print("\nValidity check (both agents move, both win some trials):")
     for tid in tournament_ids:
         health = matchup_health(out_root / tid, expected_trials=expected_trials,
                                 octagon_dir=octagon_dir, tournament_id=tid)
@@ -200,21 +240,58 @@ def check_batch(out_root, tournament_ids, expected_trials=None, octagon_dir=None
     return suspect
 
 
+def outstanding_matchups(out_root, run_ids, expected_trials=None, include_mirrors=True,
+                         include_self_matchups=True, verbose=True):
+    """
+    Return the (P1, P2) pairs a batch still needs, ready to hand to rerun_matchups.
+
+    Takes the batch output dir and the entrant list. A matchup counts as outstanding when
+    its dir is missing, holds no JSON, has no DONE.txt, or fails matchup_health. Anything
+    already complete and healthy is left alone.
+
+    Derived from what is on disk rather than from a hand-written list, so it can be called
+    again after an interruption and will return only what is still left.
+    """
+    out_root = Path(out_root)
+    todo, done = [], 0
+    for a, b in expected_matchups(run_ids, include_mirrors, include_self_matchups):
+        tid = f"{a}__vs__{b}"
+        d = out_root / tid
+        if not d.exists():
+            todo.append((a, b, "no dir"))
+            continue
+        health = matchup_health(d, expected_trials=expected_trials)
+        if not (d / "DONE.txt").exists():
+            todo.append((a, b, "no DONE.txt"))
+        elif not health["ok"]:
+            todo.append((a, b, "; ".join(health["flags"])))
+        else:
+            done += 1
+
+    if verbose:
+        total = done + len(todo)
+        print(f"{done}/{total} matchups complete, {len(todo)} outstanding")
+        for a, b, why in todo:
+            print(f"  {a}__vs__{b}  ({why})")
+    return [(a, b) for a, b, _ in todo]
+
+
 # ---------------------------------------------------------------------------
 # Smoke test
 # ---------------------------------------------------------------------------
 
 def smoke_test(model_a_run_dir, model_b_run_dir, octagon_dir, unity_env_path, out_root,
-               trial_seq, episodes=8, config_template_run_dir=None, base_port=5015,
-               verbose=True, **matchup_kwargs):
+               trial_seq, episodes=8, config_template_run_dir=None,
+               base_port=SMOKE_TEST_BASE_PORT, verbose=True, **matchup_kwargs):
     """
     Run one short matchup and verdict it, before committing to a full round-robin.
 
-    Takes the two entrant run dirs and the batch config; writes into `out_root/_smoke_test`
+    Takes the two entrant run dirs and the batch config; writes into out_root/_smoke_test
     and returns the health dict. Raises if an agent is frozen or Unity is throwing on
-    step_penalty — the two failures that silently void a whole batch.
+    step_penalty, the two faults that void a batch without any visible error.
     """
     out_root = Path(out_root)
+    assert_ports_free(base_port, MATCHUP_PORT_SPAN, what="the smoke test")
     config_yaml = write_tournament_config_yaml(
         template_run_dir=Path(config_template_run_dir or model_a_run_dir),
         out_yaml=out_root / "tournament_config.yaml",
@@ -234,7 +311,8 @@ def smoke_test(model_a_run_dir, model_b_run_dir, octagon_dir, unity_env_path, ou
     if verbose:
         print("smoke-test log:", log)
 
-    # The smoke test is short, so don't flag it as SHORT — only frozen/one-sided matter.
+    # The run is short by design, so don't check the trial count. Only frozen and
+    # one-sided matchups matter here.
     tid = f"{Path(model_a_run_dir).name}__vs__{Path(model_b_run_dir).name}"
     health = matchup_health(out_root / "_smoke_test", octagon_dir=octagon_dir, tournament_id=tid)
     if verbose:
@@ -245,12 +323,12 @@ def smoke_test(model_a_run_dir, model_b_run_dir, octagon_dir, unity_env_path, ou
         print(f"step_penalty exceptions in Unity log: {health['n_exceptions']}")
 
     if min(health["uniq_positions"].values()) <= 1:
-        raise RuntimeError("AN AGENT IS FROZEN — do not launch the round-robin")
+        raise RuntimeError("An agent is frozen. Do not launch the round-robin.")
     if health["n_exceptions"]:
         raise RuntimeError(f"Unity is still throwing on step_penalty "
-                           f"({health['n_exceptions']}) — do not launch the round-robin")
+                           f"({health['n_exceptions']}). Do not launch the round-robin.")
     if verbose:
-        print("\nSMOKE TEST PASSED — safe to run the full round-robin.")
+        print("\nSmoke test passed. Safe to run the full round-robin.")
     return health
 
 
@@ -264,17 +342,17 @@ def rerun_matchups(pairs, models_root, octagon_dir, unity_env_path, out_root, ep
     """
     Rerun specific matchups that failed or came out short, without redoing the batch.
 
-    Takes ordered (P1, P2) run_id pairs — the same ids that make up the `<P1>__vs__<P2>`
-    dir name — and the batch config; returns {tournament_id: log path or None} and prints
-    a health line per rerun. Everything else matches the round-robin, so the reruns are
+    Takes ordered (P1, P2) run_id pairs, the same ids that make up the <P1>__vs__<P2> dir
+    name, and the batch config. Returns {tournament_id: log path or None} and prints a
+    health line per rerun. Everything else matches the round-robin, so the reruns are
     drop-in replacements.
 
-    Actions are sampled, so changing `seed` re-rolls the trajectories: that is the lever
-    for a matchup that *stalled* (both models wandering without triggering a wall) rather
-    than crashed. Raising timeout_s alone mostly just buys a longer stall.
+    Actions are sampled, so changing seed re-rolls the trajectories. That is the lever for
+    a matchup that stalled, where both models wander without triggering a wall; raising
+    timeout_s alone tends to buy a longer stall.
 
-    With archive_existing, the previous output dir is moved to `out_root/../superseded/`
-    first, so the rerun's JSON is the only one left in the matchup dir.
+    With archive_existing, the previous output dir moves to out_root/../superseded/ first,
+    leaving the rerun's JSON as the only one in the matchup dir.
     """
     models_root, out_root = Path(models_root), Path(out_root)
     if not pairs:
@@ -283,6 +361,9 @@ def rerun_matchups(pairs, models_root, octagon_dir, unity_env_path, out_root, ep
     unknown = [m for pair in pairs for m in pair if not (models_root / m).exists()]
     if unknown:
         raise FileNotFoundError(f"unknown run_id(s) in pairs: {sorted(set(unknown))}")
+
+    assert_ports_free(base_port, port_step * (len(pairs) - 1) + MATCHUP_PORT_SPAN,
+                      what=f"the {len(pairs)}-matchup rerun")
 
     config_yaml = write_tournament_config_yaml(
         template_run_dir=models_root / pairs[0][0],
@@ -321,7 +402,7 @@ def rerun_matchups(pairs, models_root, octagon_dir, unity_env_path, out_root, ep
             print(f"=== Finished: {tournament_id} -> {logs[tournament_id]} ===")
         except Exception as e:
             logs[tournament_id] = None
-            print(f"=== FAILED: {tournament_id} — {type(e).__name__}: {e} ===")
+            print(f"=== Failed: {tournament_id}. {type(e).__name__}: {e} ===")
 
     if verbose:
         print()
