@@ -9,6 +9,27 @@ yaml.preserve_quotes = True
 import shutil
 import subprocess, time, os, signal
 
+# Shared training seeds, read off the 260914 run dirs (each run's configuration.yaml records the
+# seed it was trained with). sequential_runs uses these by default so every batch trains the same
+# seeds in the same order, which makes a comparison between two batches paired rather than
+# unpaired: a difference between arms is then the hyperparameter, not the luck of the draw.
+# Index i is the seed for model i+1, so 260929_0007 trains on the same seed as 260914_0007.
+# Pass seeds=None to sequential_runs to draw fresh random ones instead.
+# Seed 31 is the one 260914_0031 was started on. Seeds 32-100 were drawn with
+# random.Random(20261007).randint(0, 10**6), skipping duplicates, and are fixed from here on.
+DEFAULT_TRAINING_SEEDS = [
+    726131, 448213, 155319,  68621, 584835, 878205, 915294, 970535, 410034, 163489,
+    631403, 378759, 201455, 885226, 310413, 863655, 376274, 216613, 497442, 462529,
+    392983, 598083, 755089,   8859, 152318, 507504, 171882, 333555, 728747, 308611,
+    781674, 239536, 855470, 866465, 371902,  79975, 305416, 638504, 652686, 737937,
+    852944, 591615, 782112, 106299, 293665, 906875, 854934, 134590, 524966, 582848,
+    863391, 788275, 106756, 861424, 108205, 497665, 927080,   6008, 662738, 199707,
+    959135, 757672, 125589, 568331, 174203, 184612, 115273, 330918, 728814, 206647,
+    380192, 629395, 506881, 935593, 245983,   2789, 591375, 354064, 278096, 776574,
+    572113, 690624,  49626, 223829, 573282,  60869,  50766, 763569,  91368,  41869,
+     17666,  38461, 535873, 972007,  27638, 476591, 120245, 670209, 896769, 302873,
+]
+
 '''
 Step 1) Sample parameters from the prior
 Step 2) Patch yaml for agents to include new parameter values
@@ -414,6 +435,10 @@ def sequential_runs(
         # them to every model would make each subsequent run try to resume its
         # own (non-existent) prior checkpoint.
         extra_args: list[str] | None = None,
+        # Training seeds, taken by absolute model number so every batch trains the same seeds in
+        # the same order. Pass None to draw fresh random seeds, which makes this batch
+        # incomparable pairwise with any other.
+        seeds: list[int] | None = DEFAULT_TRAINING_SEEDS,
 ):
     '''
     in_yaml = "/Path/to/original.yaml"
@@ -428,8 +453,29 @@ def sequential_runs(
     
     run_dir = Path(run_dir)
     in_yaml = Path(in_yaml)
-    seeds = [random.randint(0, 1e6) for _ in range(n_models)]
-    print(f"Using seeds: {seeds} for {n_models} sequential runs")
+    # take the shared seeds by absolute model number, so model 0007 of any batch trains on the
+    # same seed as model 0007 of every other batch. seeds=None draws fresh random ones instead
+    if seeds is None:
+        seeds = [random.randint(0, 1e6) for _ in range(n_models)]
+        print(f"Using FRESH RANDOM seeds: {seeds} for {n_models} sequential runs")
+        print("NB batches trained on different seeds cannot be compared pairwise")
+    else:
+        need = run_id_offset + n_models
+        if len(seeds) < need:
+            raise ValueError(
+                f"need {need} seeds for {n_models} models at offset {run_id_offset}, "
+                f"but only {len(seeds)} were given. Extend the list or pass seeds=None")
+        seeds = list(seeds)[run_id_offset:need]
+        print(f"Using shared seeds: {seeds} for {n_models} sequential runs "
+              f"(models {run_id_offset + 1:04d}-{need:04d})")
+
+    # run_id_offset is the number of models already finished, so the first model trained here is
+    # run_id_offset + 1. To resume a model in progress, set run_id_offset to its number minus one
+    first_run_id = f"{base_run_id}_{run_id_offset + 1:04d}"
+    if extra_args and "--resume" in extra_args and not (run_dir / "results" / first_run_id).exists():
+        raise FileNotFoundError(
+            f"--resume was passed but results/{first_run_id} does not exist. run_id_offset counts "
+            f"finished models, so to resume model N set run_id_offset=N-1")
 
     for i in range(n_models):
         seed = seeds[i]
