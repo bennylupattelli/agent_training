@@ -1,0 +1,74 @@
+# Cell T3e-4 of the 261029 solo split-cost pilot. Generated from
+# Octagon/Assets/Scripts/MLConfigFiles/SoloSplitCostConfig261027.yaml; only environment_parameters differ.
+#
+# 261027 - Split action costs, solo. Hyperparameters copied from SocialConfig261020.yaml with
+# self_play removed and the behaviour renamed. Needs a build containing the split-cost block in
+# OctagonAgent.OnActionReceived (the 261014 and first 261027 builds throw on the missing keys).
+#
+# Three costs per step: step_penalty (time, every step), translation_cost (move and/or strafe),
+# rotation_cost (rotate). Resting pays step_penalty only.
+#
+# step_penalty is held at 0.001 in every cell (the 260723 / 261020 time cost, which gave a ~50/50
+# central/peripheral split at gamma 0.99). It sets race urgency and the timeout cost (MaxStep 1000
+# in the scene, so -1.0). The action costs are effort costs on top of it, so the only thing that
+# changes between cells is what moving or turning costs relative to resting.
+#
+# Pilot: each cost alone, 3 seeds per value, plus a (0, 0) baseline = 27 runs.
+#   translation_cost (rotation 0):  1e-4, 3e-4, 1e-3, 3e-3
+#   rotation_cost (translation 0):  1e-4, 3e-4, 1e-3, 3e-3
+# Lower bound ~1e-4: below this the cost is no bigger than the per-step RND reward around 1M steps
+# (~8e-5 in 261020), when strategies form. Upper bound 3e-3: wall to opposite wall (168 steps) then
+# costs ~0.5, near the 0.6 High-Low gap, so it should be where competent choice starts to break.
+# Totals above 2e-3 per step have never been trained (1e-4 before 260219, 1e-3 since), so a
+# failure at 3e-3 may be a learning failure rather than a strategy effect.
+#
+# One step is 0.2 units of travel or 7.2 deg of turning. Centre to wall (~16.75 units) is 84
+# steps; a full 360 deg scan is 50 steps.
+behaviors:
+  OctagonAgentSolo:
+    trainer_type: ppo
+    max_steps: 4e06         # 261020 value. beta_schedule keys off it, keep equal across cells
+    time_horizon: 128
+    summary_freq: 20000
+    keep_checkpoints: 40
+    checkpoint_interval: 100000
+    even_checkpoints: true
+
+    hyperparameters:
+      batch_size: 512
+      buffer_size: 20480
+      learning_rate: 1.5e-4
+      learning_rate_schedule: constant
+      beta: 5.0e-3
+      beta_schedule: linear
+      epsilon: 0.2
+      epsilon_schedule: constant
+      lambd: 0.95
+      num_epoch: 3
+
+    network_settings:
+      normalize: false
+      hidden_units: 512
+      num_layers: 2
+      memory:
+        sequence_length: 64
+        memory_size: 256
+
+    reward_signals:
+      extrinsic:
+        gamma: 0.99
+        strength: 1.0
+
+      rnd:
+        gamma: 0.99
+        strength: 0.01
+        learning_rate: 0.0001
+
+    self_play: null
+
+
+environment_parameters:
+  # cell T3e-4
+  step_penalty: 0.001
+  translation_cost: 0.0003
+  rotation_cost: 0.0
