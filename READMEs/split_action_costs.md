@@ -2,7 +2,8 @@
 
 Started 2026-10-20. Cost design decided 2026-10-28, and the first batch (261029, solo) started
 2026-10-29. This README covers the aim, the cost design and the reasoning behind it, how it was
-built, and how to analyse the results.
+built, and how to analyse the results. Results of the 261029 solo pilot (2026-11-03) are in
+section 8, and next steps in section 9.
 
 > **REVISIT WITH FRESH EYES.** The cost design in section 4 was settled in one long discussion that
 > changed its mind twice (from budget-matched costs to fixed `step_penalty`, then back, then fixed
@@ -270,7 +271,127 @@ original tooling intended. The questions that matter:
   (constant schedules, 261014 build) shows whether constant still gives the 50/50 mix that 260723
   (linear) gave.
 - Levels for the combined grid, after the pilot. Choose the lowest cost with a detectable effect and
-  the highest that still gives competent play.
+  the highest that still gives competent play. The pilot's answer is in section 9.
 - Seeds per cell for the full grid. 3 is enough for a pilot, but strategy is noisy across seeds, so a
   peripheral share needs more.
 - Whether to add per-trial cost logging before the next build.
+
+## 8. Results: 261029 solo pilot (characterised 2026-11-03)
+
+Runs are in `Octagon/results/2610/261029/` (see its `notes.txt`), and inference logs in
+`Octagon/simulations/2610/261029/261029_<cell>_000N/`.
+
+**Training** (4e6 steps, all 27 runs finished 2026-10-31). Final TensorBoard values (mean of the last
+5 summaries). "Reward + time cost" adds back the 0.001 x episode length that every cell pays, which
+puts the cells on a common scale: it is wall reward minus action cost per episode.
+
+| cell | reward | episode length | reward + time cost |
+| --- | --- | --- | --- |
+| (0, 0) | 0.50-0.57 | 427-439 | 0.93-1.00 |
+| T 1e-4 | 0.43-0.53 | 426-429 | 0.85-0.96 |
+| T 3e-4 | 0.36-0.44 | 427-432 | 0.79-0.87 |
+| T 1e-3 | 0.24-0.36 | 428-429 | 0.67-0.78 |
+| T 3e-3 | -1.00, 0.03, -0.89 | 999, 454, 924 | 0.00, 0.49, 0.03 |
+| R 1e-4 | 0.47-0.54 | 429-441 | 0.90-0.97 |
+| R 3e-4 | 0.43-0.50 | 428-442 | 0.87-0.93 |
+| R 1e-3 | 0.22-0.40 | 425-504 | 0.72-0.83 |
+| R 3e-3 | 0.22-0.41 | 461-502 | 0.72-0.87 |
+
+Two `T3e-3` seeds (1 and 3) collapsed: they rest until the 1000-step timeout. `T3e-3` seed 2 and
+every other run learned the task. The only cells with clearly longer episodes are `R3e-3` (all seeds) and `R1e-3` seed 2, which
+was the first sign of a strategy change.
+
+**Inference.** 201 episodes per model with the final checkpoint, on the fixed trial sequence
+`trial_sequences/trials_100000_seed17.json` (`--trial_seq`), `--seed 17`, build
+`261029/build_261029_solo_01`, each model's own cell config. All trials in this sequence are HighLow.
+Characterised with `octagon_analysis/analysis/model_characterisation.py`, with `players=(0,)` and a
+NaN agent-1 score column (the pipeline assumes self-play). The models split cleanly (GMM means 0.05
+and 0.90, 100% agreement with the 0.5 cut).
+
+| cell | central / peripheral | onset centrality | chose Low | median onset to trigger | ITI turning (deg) |
+| --- | --- | --- | --- | --- | --- |
+| (0, 0) | 3 / 0 | 0.90-0.91 | 0-10% | 1.9-2.1 s | 1520-1590 |
+| T 1e-4 to 1e-3 | 9 / 0 | 0.90-0.96 | 0-17% | 2.0 s | 1460-1640 |
+| T 3e-3 seed 1 (collapsed, 1 of 199 trials) | 0 / 1 | 0.07 | 100% | 7.2 s | 1200 |
+| T 3e-3 seed 2 (works, 196 of 199 trials) | 0 / 1 | 0.05 | 32% | 2.8 s | 360 |
+| T 3e-3 seed 3 (collapsed, 26 of 199 trials) | 0 / 1 | 0.05 | 31% | 21 s | 1370 |
+| R 1e-4, 3e-4 | 6 / 0 | 0.79-0.92 | 0-23% | 2.0-2.2 s | 780-1540 |
+| R 1e-3 | 2 / 1 | 0.84, 0.03, 0.79 | 20-26% | 1.9-3.2 s | 170-370 |
+| R 3e-3 | 0 / 3 | 0.02-0.04 | 17-35% | 3.0-3.8 s | 14-40 |
+
+**Simple interpretations.**
+
+- **The solo baseline is central** (3 of 3). The ~50/50 split of section 4.1 came from social
+  self-play (260723), so it does not carry over to solo. This fits the hypothesis that low turning
+  cost goes with central play.
+- **A high rotation cost makes agents peripheral, as hypothesised.** At `R3e-3` all three seeds
+  wait at the back of an alcove (radius ~19.6) facing the centre (median 11-37 deg off), and almost
+  stop turning in the ITI (1-3% of baseline). A lit wall is in view at onset more often (73-89%
+  against 61-76%). The cost of this: longer routes (median 28-31 units against 19-21), more Low
+  choices, and some trials that time out (156 and 190 of 199 completed by seeds 2 and 3).
+- **The switch happens between rotation 3e-4 and 3e-3.** At `R1e-3` one seed is fully peripheral,
+  and the two central ones already cut ITI turning to 11-24% of baseline. 1e-3 is where a turning
+  step costs as much as a waiting step (`step_penalty`), so trading time for turning starts to pay.
+- **Translation cost does not move waiting position up to 1e-3.** The agents stay central and save
+  by resting in the centre during the ITI (no translation on 58-78% of ITI frames at 1e-3, against
+  2-3% at baseline). So the section 4.5 prediction that translation would be the stronger lever on
+  position is not supported in solo.
+- **At `T3e-3` two seeds collapsed and one camps at the wall.** Seeds 1 and 3 rest until the timeout
+  on most trials, so their peripheral labels say nothing about strategy (their figures above come
+  from 1 and 26 completed trials). Seed 2 works: it completed 196 of 199 trials, chose High on 68%,
+  and has a median onset-to-trigger time of 2.8 s. It never moves between trials (0.07 units per
+  ITI). It waits where it last triggered (radius ~18.7, centrality 0.05), turned to face roughly into
+  the arena (median 32 deg off the centre). This is the wall camper of section 4.5, and the only
+  working peripheral strategy that translation cost alone produced. With one seed it is unknown
+  whether camping is reliable at some cost between 1e-3 and 3e-3, or a rare outcome beside collapse.
+
+**Why equal per-step costs are not equal burdens.** Applied to the baseline agents' unchanged
+behaviour (600 episodes, 435 steps each: 429 translating, 347 rotating), each cost adds per episode:
+
+| per-step cost | translation | rotation |
+| --- | --- | --- |
+| 1e-4 | 0.04 | 0.03 |
+| 3e-4 | 0.13 | 0.10 |
+| 1e-3 | 0.43 | 0.35 |
+| 3e-3 | 1.29 | 1.04 |
+
+On this measure the two 3e-3 cells are about equally severe, both near the High reward. Only
+translation broke down, because **most rotation can be avoided and most translation cannot**: the
+`R3e-3` agents pay roughly 0.03-0.06 per trial in rotation, but every trial needs a trip to a wall.
+A rough check from slice onset at gamma 0.99, for a 100-step response (the reward is discounted to
+about 0.37 for High and 0.15 for Low; the trip cost is barely discounted, ~63 effective steps):
+
+| translation cost | trip cost | net for High | net for Low |
+| --- | --- | --- | --- |
+| 1e-3 | 0.06 | +0.30 | +0.09 |
+| 2e-3 | 0.13 | +0.24 | +0.02 |
+| 3e-3 | 0.19 | +0.18 | -0.04 |
+
+At 3e-3 Low is no longer worth the trip and High is only modestly positive, so a learner near zero
+value can collapse into resting, as 2 of 3 seeds did. The third avoids the return trip by camping at
+the wall, so it pays only for the trip to the next lit wall. These figures are back-of-envelope; slower routes lower them further.
+Matching the two costs on unchanged-behaviour burden (rotation ~1.25x translation) therefore
+understates the asymmetry. Choose levels on the behaviour each cost produces instead.
+
+**Caveats.** 3 seeds per cell, and `R1e-3` splits 2/1. Solo only. Inference for the (0, 0) cell
+used `--resume` (2026-10-30), and the rest `--initialize-from` (2026-11-03). Both load the same
+final checkpoint.
+
+## 9. Next steps
+
+1. **Sample the critical ranges more finely.** Rotation between 3e-4 and 3e-3 (for example 5e-4,
+   7e-4, 1.5e-3, 2e-3), where the switch to the periphery happens, with more seeds per level so the
+   peripheral share can be estimated. Translation at about 2e-3 (perhaps also 1.5e-3), to see whether
+   the wall camping of `T3e-3` seed 2 is reliable below the cost where learning collapses. 3e-3 is
+   too high to use as a level, since 2 of 3 seeds collapsed there.
+   **First step, 261104:** 10 more seeds each for T2e-3, R1e-3 and R3e-3 (DEFAULT_TRAINING_SEEDS
+   positions 4-13), before the combined grid. See `Octagon/results/2611/261104/notes.txt`.
+2. **Combine the two cost types in one grid.** Not done yet: every pilot cell set one cost and left
+   the other at 0. Suggested ranges: translation 1e-4 to 1e-3 (plus 2e-3), rotation 3e-4 to 3e-3. It
+   tests whether a translation cost adds to the rotation effect (section 4.5 predicted a wall camper
+   at high/high, and one `T3e-3` seed already camps with translation cost alone) or only changes ITI
+   resting, as at 1e-3 and below in solo.
+3. **Run the costs in social training.** The ~50/50 split comes from self-play, so the question there
+   is whether the costs shift an existing mix, not create one. The 261029 social build reads the same
+   three parameters. Expect breakdown earlier at high translation cost, since letting the opponent
+   win a distant race is a cheaper way out (section 4.5).
